@@ -1,6 +1,7 @@
 #sensitive data
 data/
-
+database/
+local/
 
 
 # Byte-compiled / optimized / DLL files

@@ -7,7 +7,7 @@ import pandas as pd
 from utils import *
 from utils.load import get_gauge_mappings
 
-def visualise_radar_grid(data, ax, zoom=None, scaling=None):
+def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alpha=0.7, legend=True):
     '''
     Visualise weather data
     Data should contain:
@@ -17,7 +17,10 @@ def visualise_radar_grid(data, ax, zoom=None, scaling=None):
     3. Transform
     '''
 
-    d, bounds, crs, transform = data
+    d=data['data'] #data is wrapped in 2d array
+    bounds = data['bounds']
+    crs = data['crs']
+    transform = data['transform']
 
 
     data_arr = d.copy()
@@ -29,6 +32,7 @@ def visualise_radar_grid(data, ax, zoom=None, scaling=None):
     rows, cols = data_arr.shape
     pixel_width = transform[0]
     pixel_height = -transform[4]
+
 
     x_min = bounds.left
     y_min = bounds.bottom
@@ -51,6 +55,7 @@ def visualise_radar_grid(data, ax, zoom=None, scaling=None):
     values = []
     row_indices = []
     col_indices = []
+
 
     for row in range(rows):
         for col in range(cols):
@@ -87,14 +92,14 @@ def visualise_radar_grid(data, ax, zoom=None, scaling=None):
     df.plot(column='value',
              ax=ax,
              cmap='viridis',  # colormap
-             legend=True,
+             legend=legend,
              edgecolor='white',
              linewidth=0.1,
-             alpha=0.7)
+             alpha=alpha)
 
-    cx.add_basemap(ax=ax, crs=4326, source=cx.providers.CartoDB.Voyager)
+    #cx.add_basemap(ax=ax, crs=4326, source=cx.providers.CartoDB.Voyager)
 
-    return len(values)
+    return
 
 
 
@@ -102,9 +107,8 @@ def visualise_gauge_grid(node_df: gpd.GeoDataFrame, country='Singapore', ax=None
 
     node_df.plot(ax=ax, markersize=50, alpha=0.7, column="values")
     cx.add_basemap(ax, crs=4326, source=cx.providers.CartoDB.Voyager)
-    plt.show()
 
-    return ax
+    return
 
 
 def pandas_to_geodataframe(df: pd.Series):
