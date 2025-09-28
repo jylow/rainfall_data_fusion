@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from utils import *
-from utils.load import get_gauge_mappings
+from utils.load import get_gauge_coordinate_mappings
 
 def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alpha=0.7, legend=True):
     '''
@@ -56,8 +56,8 @@ def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alph
     row_indices = []
     col_indices = []
 
-
     for row in range(rows):
+        COL = 0
         for col in range(cols):
 
             # Calculate cell boundaries
@@ -68,7 +68,7 @@ def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alph
 
             if x_left < zoom_x_min or x_right > zoom_x_max or y_bottom < zoom_y_min or y_top > zoom_y_max:
                 continue
-
+            COL += 1
             polygon = Polygon([
                 (x_left, y_bottom),   # bottom-left
                 (x_right, y_bottom),  # bottom-right
@@ -81,6 +81,7 @@ def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alph
             values.append(data_arr[row][col])
             row_indices.append(row)
             col_indices.append(col)
+
 
     df = gpd.GeoDataFrame({
             'value': values,
@@ -96,9 +97,6 @@ def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alph
              edgecolor='white',
              linewidth=0.1,
              alpha=alpha)
-
-    #cx.add_basemap(ax=ax, crs=4326, source=cx.providers.CartoDB.Voyager)
-
     return
 
 
@@ -106,13 +104,40 @@ def visualise_radar_grid(data: pd.Series, ax=None, zoom=None, scaling=None, alph
 def visualise_gauge_grid(node_df: gpd.GeoDataFrame, country='Singapore', ax=None):
 
     node_df.plot(ax=ax, markersize=50, alpha=0.7, column="values")
-    cx.add_basemap(ax, crs=4326, source=cx.providers.CartoDB.Voyager)
 
     return
 
+def visualise_gauge_split(station_names: list, station_mappings: dict, split_type: str, ax=None):
+    '''
+    Takes station names and station mappings and plot the points onto a map to see training split
+    '''
+    if split_type == "validation":
+        color = "green"
+    elif split_type == "training": 
+        color = "red"
+
+    coordinate_arr = []
+
+    for station in station_names:
+        if station not in station_mappings:
+            print("Station {station} is not found")
+        else:
+            y, x = station_mappings[station]
+            coordinate_arr.append([x, y, 0])
+
+    coordinate_nparr = np.array(coordinate_arr)
+    geometry = gpd.points_from_xy(coordinate_nparr[:, 0], coordinate_nparr[:, 1])
+    node_df = gpd.GeoDataFrame(geometry=geometry)
+    node_df['values']=coordinate_nparr[:,2]
+    node_df.plot(ax=ax, markersize=50, alpha=0.7, color=color)
+
+    return
+
+def visualise_with_basemap(ax=None):
+    cx.add_basemap(ax, crs=4326, source=cx.providers.CartoDB.Voyager)
 
 def pandas_to_geodataframe(df: pd.Series):
-    station_mappings = get_gauge_mappings()
+    station_mappings = get_gauge_coordinate_mappings()
     arr = []
 
     relevant_cols = [col for col in df.keys() if col in station_mappings]

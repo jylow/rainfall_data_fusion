@@ -6,13 +6,13 @@ import numpy as np
 
 def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: dict, method='KED', variogram_model='linear'):
   '''
-  Performs Kriging with external frist on the data. 
+  Performs Kriging with external drift on the data. 
   TODO: Make the kriging generalised and not fixed based on bounds
   '''
-  row_data = df.dropna()
+  row_data = df.fillna(0)
   data = []
 
-  for s in station_names[1:]:
+  for s in station_names:
     lat, long = station_dict[s]
     data.append([long, lat, row_data[s]])
 
@@ -25,32 +25,32 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
 
   #RADAR FOR USE IN EXTERNAL DRIFT
 
-  radar_grid = row_data['data']
-  bounds = row_data['bounds']
-  transform = row_data['transform']
-  x_min = bounds.left
-  y_max = bounds.top
-  pixel_width = transform[0]
-  pixel_height = -transform[4]
+  # radar_grid = row_data['data']
+  # bounds = row_data['bounds']
+  # transform = row_data['transform']
+  # x_min = bounds.left
+  # y_max = bounds.top
+  # pixel_width = transform[0]
+  # pixel_height = -transform[4]
 
-  e_dx = []
-  e_dy = []
+  # e_dx = []
+  # e_dy = []
 
-  for row in range(radar_grid.shape[0]): 
-      y = y_max - (row * pixel_height) + pixel_height / 2
-      e_dy.append(y)
+  # for row in range(radar_grid.shape[0]): 
+  #     y = y_max - (row * pixel_height) + pixel_height / 2
+  #     e_dy.append(y)
 
-  for col in range(radar_grid.shape[0]):
+  # for col in range(radar_grid.shape[0]):
 
-      # Calculate middle of cell
-      x = x_min + (col * pixel_width) + pixel_width / 2
-      e_dx.append(x)
+  #     # Calculate middle of cell
+  #     x = x_min + (col * pixel_width) + pixel_width / 2
+  #     e_dx.append(x)
 
   if np.count_nonzero(gauge_data[:, 2]) < 1:
      return None, None
 
-  e_dx = np.array(e_dx)
-  e_dy = np.array(e_dy)
+  # e_dx = np.array(e_dx)
+  # e_dy = np.array(e_dy)
   
 
   if method == 'KED':

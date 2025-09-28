@@ -4,11 +4,13 @@ import pandas as pd
 import random
 import time
 import tqdm
+import matplotlib.pyplot as plt
 
 from utils.load import load_raingauge_dataset, get_gauge_coordinate_mappings
+from utils.visualisation import visualise_gauge_grid, visualise_gauge_split, visualise_with_basemap
 
 
-def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_split=0.7, seed=42, power=1):
+def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_split=0.7, seed=42, power=1, visualise_split=False, loss_hist=False):
 
   start_time = time.time()
   random.seed(seed)
@@ -16,9 +18,18 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
   cols = raingauge_data.columns
   station_names = [i for i in cols if i in coordinates.keys()]
 
+  #loss histogram display
+  loss_data = []
+
   #Perform splitting of stations
   training_stations = random.sample(station_names, int(len(station_names) * training_split))
   validation_stations = [s for s in station_names if s not in training_stations]  
+
+  if visualise_split:
+     fig, ax = plt.subplots(figsize=(15,8))
+     visualise_gauge_split(training_stations, coordinates, split_type="training", ax=ax)
+     visualise_gauge_split(validation_stations, coordinates, split_type="validation", ax=ax)
+     visualise_with_basemap(ax=ax)
   
   print(f"training_stations {training_stations}")
   print(f'validation_stations {validation_stations}')
@@ -52,8 +63,8 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
     predicted_values = np.array(predicted_values)
     validation_values = np.array(validation_values)
     loss = np.mean(np.sqrt((predicted_values - validation_values) ** 2))
-    print(f"batchloss = {loss}")
     total_RMSE_loss += loss
+    loss_data.append(loss)
     instance_count+=1
 
   average_RMSE_loss = total_RMSE_loss / instance_count
@@ -63,6 +74,12 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
 
   print(f"The average RMSE loss was {average_RMSE_loss} mm/hr")
   print(f"The time taken was {time_taken} seconds")
+
+  if loss_hist:
+    plt.figure(figsize=(15,8))
+    plt.title("Loss histogram (mm/hr)")
+    plt.hist(loss_data, bins=30, log=True) #plot on a log scale
+    plt.show()
 
   return average_RMSE_loss
 
