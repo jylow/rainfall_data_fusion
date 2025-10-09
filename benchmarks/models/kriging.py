@@ -24,33 +24,35 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
   gridy = np.arange(1.145, 1.51, 0.01)
 
   #RADAR FOR USE IN EXTERNAL DRIFT
+  if method == 'KED':
+    radar_grid = row_data['data']
+    bounds = row_data['bounds']
+    transform = row_data['transform']
+    x_min = bounds.left
+    y_max = bounds.top
+    pixel_width = transform[0]
+    pixel_height = -transform[4]
 
-  # radar_grid = row_data['data']
-  # bounds = row_data['bounds']
-  # transform = row_data['transform']
-  # x_min = bounds.left
-  # y_max = bounds.top
-  # pixel_width = transform[0]
-  # pixel_height = -transform[4]
+    e_dx = []
+    e_dy = []
 
-  # e_dx = []
-  # e_dy = []
+    for row in range(radar_grid.shape[0]): 
+        y = y_max - (row * pixel_height) + pixel_height / 2
+        e_dy.append(y)
 
-  # for row in range(radar_grid.shape[0]): 
-  #     y = y_max - (row * pixel_height) + pixel_height / 2
-  #     e_dy.append(y)
+    for col in range(radar_grid.shape[0]):
 
-  # for col in range(radar_grid.shape[0]):
+        # Calculate middle of cell
+        x = x_min + (col * pixel_width) + pixel_width / 2
+        e_dx.append(x)
 
-  #     # Calculate middle of cell
-  #     x = x_min + (col * pixel_width) + pixel_width / 2
-  #     e_dx.append(x)
+    e_dx = np.array(e_dx)
+    e_dy = np.array(e_dy)
 
+  #Kriging does not work when the gauge data has values that are all 0
   if np.count_nonzero(gauge_data[:, 2]) < 1:
-     return None, None
+    return None, None
 
-  # e_dx = np.array(e_dx)
-  # e_dy = np.array(e_dy)
   
 
   if method == 'KED':

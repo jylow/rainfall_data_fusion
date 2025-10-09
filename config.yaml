@@ -1,0 +1,7 @@
+# dataset creation parameters
+dataset_parameters:
+  database_folder: 'database'
+  train_size: 0.7     #training set size
+  test_size: 0.1      #test set size
+  seed: 111           #seed for randomness in training/test split
+
