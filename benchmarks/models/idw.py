@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 from utils.load import load_raingauge_dataset, get_gauge_coordinate_mappings
-from utils.visualisation import visualise_gauge_grid, visualise_gauge_split, visualise_with_basemap
+from utils.visualisation import *
 
 
-def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_stations: list, validation_stations: list, power=1, loss_hist=False, x_grid=None, y_grid=None, plot_time_start=None, ax=None, axis_rows=0, axis_cols=0, n_nearest=None):
+def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_stations: list, test_stations: list, power=1, loss_hist=False, x_grid=None, y_grid=None, plot_time_start=None, ax=None, axis_rows=0, axis_cols=0, n_nearest=None, regression_plot=False):
 
   '''
   Runs IDW benchmark. A grid will be generated based on the given x and y coordinate values and will be compared with the training
@@ -32,14 +32,13 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
 
   #loss histogram display
   loss_data = []
+  actual_values_arr = np.zeros(shape=[raingauge_data.shape[0], len(test_stations)])
+  predicted_values_arr = np.zeros(shape=[raingauge_data.shape[0], len(test_stations)])
 
   print(f"training_stations {training_stations}")
-  print(f'validation_stations {validation_stations}')
-  total_RMSE_loss = 0.0
-  total_RMSE_loss_pointwise = 0.0
-  instance_count = 0
+  print(f'validation_stations {test_stations}')
 
-  for row in tqdm.tqdm(raingauge_data.iterrows()):
+  for idx, row in tqdm.tqdm(enumerate(raingauge_data.iterrows())):
     timestamp = row[0]
     row = row[1].fillna(0) ##hacky
     known_x = []
@@ -71,35 +70,42 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
           y_grid,
           predicted_values,
           shading='nearest',
-          cmap= cmap,
-          norm= mpl.colors.BoundaryNorm(boundaries=[0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20], ncolors=256, extend='both'),
+          cmap=cmap,
+          norm=mpl.colors.BoundaryNorm(boundaries=[0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20], ncolors=256, extend='both'),
           alpha=0.5,
        )
        axi.set_title(str(timestamp))
+       visualise_singapore_outline(ax=axi)
        visualise_with_basemap(axi)
        axcount += 1
-
-
-    RMSE = 0.0
-    loss = []
-    for station in validation_stations:
+    
+    row_predicted_arr = []
+    row_actual_arr = []
+    for station in test_stations:
        lat, lon = coordinates[station]
        val = row[station]
        resolution = x_grid[1] - x_grid[0]
        r = math.floor((lon - x_grid[0]) / resolution)
        c = math.floor((lat - y_grid[0]) / resolution)
-       loss.append(((val - predicted_values[c][r]) ** 2))
+       row_actual_arr.append(val)
+       row_predicted_arr.append(predicted_values[c][r])
+    
+    actual_values_arr[idx] = np.array(row_actual_arr)
+    predicted_values_arr[idx] = np.array(row_predicted_arr)
 
-       #compare against the grid
-      #  result = idw_interpolation(known_points=zip(known_x, known_y), known_values=known_values, target_points=[(lat, lon)])
-      #  if loss > 1:
-      #   print(f"Predicated: {predicted_values[c][r]}, actual: {val}")
-    row_RMSE = np.sqrt(np.mean(np.array(loss)))
-    total_RMSE_loss += row_RMSE
-    loss_data.append(loss)
-    instance_count+=1
 
-  average_RMSE_loss = total_RMSE_loss / instance_count
+  #Calculate loss
+  print("CALCULATING LOS")
+  MSE_arr = []
+  print(len(actual_values_arr))
+  for i in range(len(actual_values_arr)):
+     actual = np.array(actual_values_arr[i])
+     predicted = np.array(predicted_values_arr[i])
+     timestamp_loss = np.mean((actual - predicted) ** 2) #calculating the MSE
+     MSE_arr.append(timestamp_loss)
+
+  average_MSE_loss = np.mean(np.array(MSE_arr))
+  average_RMSE_loss = np.mean(np.sqrt(np.array(MSE_arr)))
   end_time = time.time()
 
   time_taken = end_time - start_time
@@ -113,7 +119,19 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
     plt.hist(loss_data, bins=30, log=True) #plot on a log scale
     plt.show()
 
-  return average_RMSE_loss
+  if regression_plot:
+    plt.figure(figsize=(10,10))
+    actual = np.array(actual_values_arr).flatten()
+    predicted = np.array(predicted_values_arr).flatten()
+    plt.scatter(x=actual, y=predicted)
+    plot_bound = max(np.max(actual).astype(int),np.max(predicted).astype(int))
+    plt.plot(np.linspace(0,plot_bound,100),
+            np.linspace(0,plot_bound,100))
+    plt.xlabel('actual_values')
+    plt.ylabel('predicted_values')
+    plt.show()
+
+  return average_MSE_loss
 
 def idw_interpolation_gridded(x_grid, y_grid, gauge_x, gauge_y, gauge_z, power=2, smoothing=0, n_nearest=None):
     """
@@ -191,62 +209,3 @@ def idw_interpolation_gridded(x_grid, y_grid, gauge_x, gauge_y, gauge_z, power=2
                 z_interpolated[i, j] = np.sum(weights * local_gauge_z)
 
     return z_interpolated
-
-
-def idw_interpolation(known_points, known_values, target_points, power=2, epsilon=1e-12):
-    """
-    Perform Inverse Distance Weighted (IDW) interpolation.
-    
-    Parameters:
-    -----------
-    known_points : array-like, shape (n_known, n_dims)
-        Coordinates of known data points
-    known_values : array-like, shape (n_known,)
-        Values at the known data points
-    target_points : array-like, shape (n_target, n_dims)
-        Coordinates where interpolation is desired
-    power : float, default=2
-        Power parameter for inverse distance weighting (higher = more local influence)
-    epsilon : float, default=1e-12
-        Small value to avoid division by zero when target point coincides with known point
-    
-    Returns:
-    --------
-    interpolated_values : ndarray, shape (n_target,)
-        Interpolated values at target points
-    """
-    known_points = np.array(known_points)
-    known_values = np.array(known_values)
-    target_points = np.array(target_points)
-    
-    # Ensure arrays have correct dimensions
-    if known_points.ndim == 1:
-        known_points = known_points.reshape(-1, 1)
-    if target_points.ndim == 1:
-        target_points = target_points.reshape(-1, 1)
-    
-    n_target = target_points.shape[0]
-    n_known = known_points.shape[0]
-    
-    interpolated_values = np.zeros(n_target)
-    
-    for i, target in enumerate(target_points):
-        # Calculate distances from target point to all known points
-        distances = np.sqrt(np.sum((known_points - target) ** 2, axis=1))
-        
-        # Handle case where target point coincides with a known point
-        if np.any(distances < epsilon):
-            # If target point is very close to a known point, use that value
-            closest_idx = np.argmin(distances)
-            interpolated_values[i] = known_values[closest_idx]
-        else:
-            # Calculate weights (inverse distance with power)
-            weights = 1 / (distances ** power)
-            
-            # Normalize weights
-            weights = weights / np.sum(weights)
-            
-            # Calculate weighted average
-            interpolated_values[i] = np.sum(weights * known_values)
-    
-    return interpolated_values

@@ -3,6 +3,7 @@ from shapely.geometry import Polygon
 import contextily as cx
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import pandas as pd
 from utils import *
 from utils.load import get_gauge_coordinate_mappings
@@ -91,9 +92,9 @@ def visualise_singapore_outline(ax=None):
   
 
 
-def visualise_gauge_grid(node_df: gpd.GeoDataFrame, country='Singapore', ax=None):
+def visualise_gauge_grid(node_df: gpd.GeoDataFrame, country='Singapore', ax=None, bounds=None):
 
-    node_df.plot(ax=ax, markersize=50, alpha=0.7, column="values", cmap='turbo')
+    node_df.plot(ax=ax, markersize=50, alpha=0.7, column="values", cmap='turbo', norm=mpl.colors.BoundaryNorm(boundaries=[0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20], ncolors=256, extend='both'))
 
     return
 

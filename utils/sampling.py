@@ -6,7 +6,7 @@ import contextily as cx
 from utils.visualisation import visualise_singapore_outline, visualise_with_basemap
 
 def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_percent=20,
-                                     n_clusters=8, random_state=42, plot=True):
+                                     n_clusters=8, seed=42, plot=True):
     """
     Perform stratified spatial sampling using K-means clustering for both statistical and ML methods.
     
@@ -26,7 +26,7 @@ def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_p
         Only used for ML method
     n_clusters : int
         Number of spatial clusters to create (default: 8)
-    random_state : int
+    seed : int
         Random seed for reproducibility (default: 42)
     plot : bool
         Whether to create visualization (default: True)
@@ -62,7 +62,7 @@ def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_p
     print(f"="*70)
     print(f"Total stations: {n_stations}")
     print(f"Number of clusters: {n_clusters}")
-    print(f"Random seed: {random_state}")
+    print(f"Random seed: {seed}")
     print(f"\nSplit configuration:")
     print(f"  - Test (shared): {test_percent}%")
     print(f"  - Statistical train: {100-test_percent}%")
@@ -74,7 +74,7 @@ def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_p
     print(f"STEP 1: K-means Clustering")
     print(f"{'='*70}")
     
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=seed, n_init=10)
     cluster_labels = kmeans.fit_predict(station_coords)
     centroids = kmeans.cluster_centers_
     
@@ -98,7 +98,7 @@ def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_p
         n_cluster = len(cluster_indices)
         
         # Shuffle indices with cluster-specific seed for reproducibility
-        np.random.seed(random_state + cluster_id)
+        np.random.seed(seed + cluster_id)
         shuffled_indices = cluster_indices.copy()
         np.random.shuffle(shuffled_indices)
         
@@ -156,7 +156,7 @@ def stratified_spatial_sampling_dual(station_dict, test_percent=10, validation_p
             continue
         
         # Shuffle with different seed for train/val split
-        np.random.seed(random_state + cluster_id + 100)
+        np.random.seed(seed + cluster_id + 100)
         shuffled_remaining = np.array(cluster_remaining).copy()
         np.random.shuffle(shuffled_remaining)
         
