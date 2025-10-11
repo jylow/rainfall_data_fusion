@@ -86,7 +86,7 @@ def improved_visualise_radar_grid(data: pd.Series, ax=None, zoom=None, vmin=0, v
 
 def visualise_singapore_outline(ax=None):
     singapore = gpd.read_file('database/NationalMapPolygon.geojson')
-    singapore = singapore.loc[557:558, :] # perimeter bounds of singapore
+    singapore = singapore.loc[[522,523,533,550,551,552,558], :] # perimeter bounds of singapore
     singapore.boundary.plot(ax=ax)
   
 
