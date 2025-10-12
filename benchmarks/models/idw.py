@@ -85,10 +85,10 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
        lat, lon = coordinates[station]
        val = row[station]
        resolution = x_grid[1] - x_grid[0]
-       r = math.floor((lon - x_grid[0]) / resolution)
-       c = math.floor((lat - y_grid[0]) / resolution)
+       r = math.floor((y_grid[0] - lat) / resolution)
+       c = math.floor((lon - x_grid[0]) / resolution)
        row_actual_arr.append(val)
-       row_predicted_arr.append(predicted_values[c][r])
+       row_predicted_arr.append(predicted_values[r][c])
     
     actual_values_arr[idx] = np.array(row_actual_arr)
     predicted_values_arr[idx] = np.array(row_predicted_arr)

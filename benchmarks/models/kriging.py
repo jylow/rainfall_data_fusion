@@ -20,8 +20,9 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
 
 
   #NOTE: GRID RANGES ARE FIXED
-  gridx = np.arange(103.605, 104.05, 0.01)
+  gridx = np.arange(103.605, 104.1, 0.01)
   gridy = np.arange(1.145, 1.51, 0.01)
+  gridy = gridy[::-1] #flip along the y
 
   #RADAR FOR USE IN EXTERNAL DRIFT
   if method == 'KED':
@@ -33,27 +34,14 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
     pixel_width = transform[0]
     pixel_height = -transform[4]
 
-    e_dx = []
-    e_dy = []
+    e_dx = np.arange(bounds.left + 0.005, bounds.right - 0.005, 0.01)
+    e_dy = np.arange(round(bounds.top,2) -0.005, round(bounds.bottom,2), -0.01)
 
-    for row in range(radar_grid.shape[0]): 
-        y = y_max - (row * pixel_height) + pixel_height / 2
-        e_dy.append(y)
-
-    for col in range(radar_grid.shape[0]):
-
-        # Calculate middle of cell
-        x = x_min + (col * pixel_width) + pixel_width / 2
-        e_dx.append(x)
-
-    e_dx = np.array(e_dx)
-    e_dy = np.array(e_dy)
 
   #Kriging does not work when the gauge data has values that are all 0
   if np.count_nonzero(gauge_data[:, 2]) < 1:
     return None, None
 
-  
 
   if method == 'KED':
     model = UniversalKriging(
