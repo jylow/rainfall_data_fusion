@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import pandas as pd
 from utils import *
-from utils.load import get_gauge_coordinate_mappings
+from utils.load import *
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
@@ -129,18 +129,23 @@ def visualise_with_basemap(ax=None):
     
 
 def pandas_to_geodataframe(df: pd.Series):
-    station_mappings = get_gauge_coordinate_mappings()
+    station_mappings = get_station_coordinate_mappings()
     arr = []
 
     relevant_cols = [col for col in df.keys() if col in station_mappings]
 
     for station in relevant_cols:
         val = df[station]
+        print(val)
         y,x = station_mappings[station]
         arr.append([x, y, val])
 
+    print(arr)
+    print(len(arr))
+
     #conversion from processed df to gpd
     nparr = np.array(arr)
+    print(nparr)
     geometry = gpd.points_from_xy(nparr[:, 0], nparr[:, 1])
     node_df = gpd.GeoDataFrame(geometry=geometry)
     node_df['values']=nparr[:,2]
