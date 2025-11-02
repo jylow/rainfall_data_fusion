@@ -9,15 +9,16 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
   Performs Kriging with external drift on the data. 
   TODO: Make the kriging generalised and not fixed based on bounds
   '''
-  row_data = df.fillna(0)
+  row_data = df.dropna()
   data = []
 
+  #if rain gauge value is nan, we do not consider it for kriging
   for s in station_names:
-    lat, long = station_dict[s]
-    data.append([long, lat, row_data[s]])
+    if s in row_data.index:
+      lat, long = station_dict[s]
+      data.append([long, lat, row_data[s]])
 
   gauge_data = np.array(data)
-
 
   #NOTE: GRID RANGES ARE FIXED
   gridx = np.arange(103.605, 104.1, 0.01)
@@ -39,7 +40,7 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
 
 
   #Kriging does not work when the gauge data has values that are all 0
-  if np.count_nonzero(gauge_data[:, 2]) < 1:
+  if gauge_data.shape[0] == 0 or np.count_nonzero(gauge_data[:, 2]) < 1:
     return None, None
 
 
@@ -53,7 +54,7 @@ def kriging_external_drift(df: pd.DataFrame, station_names: list, station_dict: 
         external_drift=radar_grid,
         external_drift_x=e_dx,
         external_drift_y=e_dy,
-        pseudo_inv=True
+        pseudo_inv=True,
     )
 
   elif method == 'universal': # Defaults to ordinary universal kriging if all sensors dont collect rain

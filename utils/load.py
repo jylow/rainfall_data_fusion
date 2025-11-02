@@ -75,12 +75,9 @@ def load_raingauge_dataset(dataset_name:str , dataset_folder='database', N=0) ->
 
 def load_weather_station_dataset(dataset_name: str, dataset_folder='database') -> pd.DataFrame:
     '''
-    Loads weather station dataset into a pandas DataFrame object
+    Loads weather station dataset(CSV) into a pandas DataFrame object
     ------
     dataset_name: .csv file
-    N: filter for timestamp that contains >= N non-zero datapoints
-        file containing dictionary with dataset creation information
-
     '''   
 
     path = f"{dataset_folder}/{dataset_name}"
@@ -172,7 +169,7 @@ def get_station_coordinate_mappings() -> dict:
     '''
     Returns dictionary containing the mappings of station names to coordinates for raingauge
     
-    dict: [key, (lat,long)]
+    dict: [key, (lat,lon)]
     ------
     '''   
 
@@ -182,8 +179,8 @@ def get_station_coordinate_mappings() -> dict:
     station_name_to_coordinates = station_locations_df[['gid', 'latitude', 'longitude']].to_numpy()
     station_dict = dict()
 
-    for name, lat, long in station_name_to_coordinates:
-        station_dict[name] = (lat, long)
+    for name, lat, lon in station_name_to_coordinates:
+        station_dict[name] = (lat, lon)
 
     gauge_df = gauge_df[gauge_df['gid'].isin(station_locations)]
 

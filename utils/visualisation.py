@@ -136,16 +136,13 @@ def pandas_to_geodataframe(df: pd.Series):
 
     for station in relevant_cols:
         val = df[station]
-        print(val)
         y,x = station_mappings[station]
         arr.append([x, y, val])
 
-    print(arr)
-    print(len(arr))
+
 
     #conversion from processed df to gpd
     nparr = np.array(arr)
-    print(nparr)
     geometry = gpd.points_from_xy(nparr[:, 0], nparr[:, 1])
     node_df = gpd.GeoDataFrame(geometry=geometry)
     node_df['values']=nparr[:,2]

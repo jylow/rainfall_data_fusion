@@ -6,6 +6,7 @@ import time
 import tqdm
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+from scipy.stats import pearsonr, spearmanr
 
 from utils.load import load_raingauge_dataset, get_gauge_coordinate_mappings
 from utils.visualisation import *
@@ -40,17 +41,19 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
 
   for idx, row in tqdm.tqdm(enumerate(raingauge_data.iterrows())):
     timestamp = row[0]
-    row = row[1].fillna(0) ##hacky
+    #row = row[1].fillna(0) ##hacky
+    row = row[1].dropna()
     known_x = []
     known_y = []
     known_values = []
     predicted_values = []
 
     for station in training_stations:
-      lat, lon = coordinates[station]
-      known_x.append(lon)
-      known_y.append(lat)
-      known_values.append(row[station])
+      if station in row.index:
+        lat, lon = coordinates[station]
+        known_x.append(lon)
+        known_y.append(lat)
+        known_values.append(row[station])
 
     predicted_values = idw_interpolation_gridded(x_grid=x_grid,
                                          y_grid=y_grid,
@@ -82,13 +85,17 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
     row_predicted_arr = []
     row_actual_arr = []
     for station in test_stations:
-       lat, lon = coordinates[station]
-       val = row[station]
-       resolution = x_grid[1] - x_grid[0]
-       r = math.floor((y_grid[0] - lat) / resolution)
-       c = math.floor((lon - x_grid[0]) / resolution)
-       row_actual_arr.append(val)
-       row_predicted_arr.append(predicted_values[r][c])
+      if station in row.index:
+        lat, lon = coordinates[station]
+        val = row[station]
+        resolution = x_grid[1] - x_grid[0]
+        r = math.floor((y_grid[0] - lat) / resolution)
+        c = math.floor((lon - x_grid[0]) / resolution)
+        row_actual_arr.append(val)
+        row_predicted_arr.append(predicted_values[r][c])
+      else:
+        row_actual_arr.append(np.nan)
+        row_predicted_arr.append(np.nan)
     
     actual_values_arr[idx] = np.array(row_actual_arr)
     predicted_values_arr[idx] = np.array(row_predicted_arr)
@@ -101,11 +108,12 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
   for i in range(len(actual_values_arr)):
      actual = np.array(actual_values_arr[i])
      predicted = np.array(predicted_values_arr[i])
-     timestamp_loss = np.mean((actual - predicted) ** 2) #calculating the MSE
+     mask = ~np.isnan(actual)
+     timestamp_loss = np.mean((actual[mask] - predicted[mask]) ** 2) #calculating the MSE
      MSE_arr.append(timestamp_loss)
 
-  average_MSE_loss = np.mean(np.array(MSE_arr))
-  average_RMSE_loss = np.mean(np.sqrt(np.array(MSE_arr)))
+  average_MSE_loss = np.nansum(np.array(MSE_arr)) / raingauge_data.shape[0]
+  average_RMSE_loss = np.nansum(np.sqrt(np.array(MSE_arr))) / raingauge_data.shape[0]
   end_time = time.time()
 
   time_taken = end_time - start_time
@@ -124,12 +132,16 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
     actual = np.array(actual_values_arr).flatten()
     predicted = np.array(predicted_values_arr).flatten()
     plt.scatter(x=actual, y=predicted)
-    plot_bound = max(np.max(actual).astype(int),np.max(predicted).astype(int))
+    plot_bound = max(np.nanmax(actual).astype(int),np.nanmax(predicted).astype(int))
     plt.plot(np.linspace(0,plot_bound,100),
             np.linspace(0,plot_bound,100))
     plt.xlabel('actual_values')
     plt.ylabel('predicted_values')
     plt.show()
+
+    mask = ~np.isnan(actual)
+    pearson_r_global, pearson_p_global = pearsonr(actual[mask], predicted[mask])
+    print(f"Pearson correlation: {pearson_r_global}")
 
   return average_MSE_loss
 
