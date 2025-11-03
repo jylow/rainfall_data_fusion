@@ -98,6 +98,31 @@ def visualise_gauge_grid(node_df: gpd.GeoDataFrame, country='Singapore', ax=None
 
     return
 
+def visualise_gauge_radius(node_df: gpd.GeoDataFrame, country='Singapore', ax=None, bounds=None, range=2):
+
+    radius_km = 2
+    lat = 1.3  # approximate latitude for Singapore
+    
+    # Calculate degree offset for 2km
+    radius_deg_lat = radius_km / 111.0
+    radius_deg_lon = radius_km / (111.0 * np.cos(np.radians(lat)))
+    
+    # Use average for circular buffer
+    radius_deg = (radius_deg_lat + radius_deg_lon) / 2
+    
+    # Create circles by buffering the points
+    circles = node_df.copy()
+    circles['geometry'] = circles.geometry.buffer(radius_deg)
+    
+    # Plot the circles
+    circles.plot(
+        ax=ax, 
+        alpha=0.5, 
+        edgecolor='black',
+        linewidth=0.5
+    )
+
+
 def visualise_gauge_split(station_names: list, station_mappings: dict, split_type: str, ax=None):
     '''
     Takes station names and station mappings and plot the points onto a map to see training split
