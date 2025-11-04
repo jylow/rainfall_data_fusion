@@ -86,6 +86,7 @@ def load_weather_station_dataset(dataset_name: str, dataset_folder='database') -
     #format time
     gauge_df.rename(columns={"timestamp": "time_sgt", "station_id": "gid"}, inplace=True)
     gauge_df['time_sgt'] = gauge_df['time_sgt'].apply(lambda x : datetime.strptime(x, '%Y-%m-%dT%H:%M:00+08:00'))
+    #gauge_df['time_sgt'] = gauge_df['time_sgt'].apply(lambda x : datetime.strptime(x, '%Y-%m-%d %H:%M:00'))
 
     #convert to table with stations as columns
     filtered_res = gauge_df
@@ -159,13 +160,13 @@ def get_gauge_coordinate_mappings() -> dict:
 
     return station_dict
 
-def get_gauge_stations() -> pd.DataFrame:
+def get_gauge_stations(filename = 'databse/station_locations.csv') -> pd.DataFrame:
 
-    station_locations_df = pd.read_csv('database/station_locations.csv')
+    station_locations_df = pd.read_csv(filename)
 
     return station_locations_df
 
-def get_station_coordinate_mappings() -> dict:
+def get_station_coordinate_mappings(filename = 'database/weather_stations.csv') -> dict:
     '''
     Returns dictionary containing the mappings of station names to coordinates for raingauge
     
@@ -173,8 +174,8 @@ def get_station_coordinate_mappings() -> dict:
     ------
     '''   
 
-    gauge_df = pd.read_csv('database/weather_stations.csv')
-    station_locations_df = get_gauge_stations()
+    gauge_df = pd.read_csv(filename)
+    station_locations_df = get_gauge_stations(filename)
     station_locations = station_locations_df['gid'].to_numpy()
     station_name_to_coordinates = station_locations_df[['gid', 'latitude', 'longitude']].to_numpy()
     station_dict = dict()
@@ -186,9 +187,9 @@ def get_station_coordinate_mappings() -> dict:
 
     return station_dict
 
-def get_weather_stations() -> pd.DataFrame:
+def get_weather_stations(filename = 'database/weather_stations.csv') -> pd.DataFrame:
 
-    station_location_df = pd.read_csv('database/weather_stations.csv')
+    station_location_df = pd.read_csv(filename)
     
     return station_location_df
 
