@@ -9,7 +9,7 @@ get_ipython().run_line_magic("autoreload", "2")
 
 from src.sampling import stratified_spatial_sampling_dual
 from src.utils import *
-from data.weather_graph_dataset import WeatherGraphDataset
+from dataset.weather_graph_dataset import WeatherGraphDataset
 
 import torch
 from torch_geometric.data import HeteroData

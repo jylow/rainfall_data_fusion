@@ -3,7 +3,7 @@ import contextily as cx
 import numpy as np
 import pandas as pd
 
-from src.raingauge.data import get_station_coordinate_mappings
+from src.raingauge.utils import get_station_coordinate_mappings
 
 
 def visualise_singapore_outline(ax=None):
