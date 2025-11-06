@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import pearsonr, spearmanr
 
-from utils.load import load_raingauge_dataset, get_gauge_coordinate_mappings
-from utils.visualisation import *
+from src.utils import load_raingauge_dataset, get_gauge_coordinate_mappings
+from src.visualisation import *
 
 
 def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_stations: list, test_stations: list, power=1, loss_hist=False, x_grid=None, y_grid=None, plot_time_start=None, ax=None, axis_rows=0, axis_cols=0, n_nearest=None, regression_plot=False):
