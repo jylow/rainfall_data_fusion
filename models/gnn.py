@@ -90,7 +90,39 @@ class HeteroGNN2(torch.nn.Module):
             'rainfall_station': self.lin_rainfall(x_dict['rainfall_station'])
         }
 
+class HeteroGCNGNN(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_layers):
+        super().__init__()
+        self.convs = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            conv = HeteroConv({
+                    ('general_station', 'gen_to_gen', 'general_station'): 
+                        GCNConv((-1, -1), hidden_channels),
+                    ('general_station', 'gen_to_rain', 'rainfall_station'): 
+                        GCNConv((-1, -1), hidden_channels),
+                    ('rainfall_station', 'rain_to_gen', 'general_station'): 
+                        GCNConv((-1, -1), hidden_channels),
+                    ('rainfall_station', 'rain_to_rain', 'rainfall_station'): 
+                        GCNConv((-1, -1), hidden_channels),
+                }, aggr='mean')
+            self.convs.append(conv)
 
+            self.lin_rainfall = Linear(hidden_channels, out_channels)
+            self.lin_general = Linear(hidden_channels, out_channels)
+
+    
+    def forward(self, x_dict, edge_index_dict, edge_weights_dict):
+        # First layer: aggregate from original features
+        for conv in self.convs:
+            x_dict = conv({key: x for key, x in x_dict.items()}, 
+                            edge_index_dict, edge_weights_dict)
+            x_dict = {key: x.relu() for key, x in x_dict.items()}
+        
+        
+        return {
+            'general_station': self.lin_general(x_dict['general_station']),
+            'rainfall_station': self.lin_rainfall(x_dict['rainfall_station'])
+        }
 
 class HeteroSAGEGNN(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_layers):
