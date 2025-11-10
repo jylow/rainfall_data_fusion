@@ -97,13 +97,13 @@ class HeteroGCNGNN(torch.nn.Module):
         for _ in range(num_layers):
             conv = HeteroConv({
                     ('general_station', 'gen_to_gen', 'general_station'): 
-                        GCNConv((-1, -1), hidden_channels),
+                        GCNConv(-1, hidden_channels, add_self_loops=True),
                     ('general_station', 'gen_to_rain', 'rainfall_station'): 
-                        GCNConv((-1, -1), hidden_channels),
+                        GCNConv(-1, hidden_channels, add_self_loops=False),
                     ('rainfall_station', 'rain_to_gen', 'general_station'): 
-                        GCNConv((-1, -1), hidden_channels),
+                        GCNConv(-1, hidden_channels, add_self_loops=False),
                     ('rainfall_station', 'rain_to_rain', 'rainfall_station'): 
-                        GCNConv((-1, -1), hidden_channels),
+                        GCNConv(-1, hidden_channels, add_self_loops=True),
                 }, aggr='mean')
             self.convs.append(conv)
 
