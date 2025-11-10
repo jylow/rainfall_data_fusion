@@ -13,7 +13,7 @@ class RadarDataObject:
         self.transform = transform
 
 
-def load_radar_dataset(folder_name: str, dataset_folder="database") -> pd.DataFrame:
+def load_radar_dataset(folder_name: str, dataset_folder="database", cropped=False) -> pd.DataFrame:
     """
     Loads radar dataset into a pandas DataFrame object
     ------
@@ -32,7 +32,7 @@ def load_radar_dataset(folder_name: str, dataset_folder="database") -> pd.DataFr
             for filename in os.listdir(path):
                 if filename.endswith(".tif"):
                     count += 1
-                    timestamp = filename.split("_")[2]
+                    timestamp = filename.split("_")[3] if cropped else filename.split("_")[2]
                     timestamp = datetime.strptime(timestamp, "%Y%m%d%H%M")
                     data, bounds, crs, transform = read_tif_file(
                         os.path.join(path, filename)
