@@ -212,5 +212,5 @@ marimo/_lsp/
 __marimo__/
 .DS_Store
 
-# Weights
-weights
+# Experiments
+experiments

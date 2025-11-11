@@ -12,6 +12,14 @@ class HeteroGNN_WithRadar(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_layers):
         super().__init__()
         self.convs = torch.nn.ModuleList()
+
+        # store constructor arguments
+        self.config = dict(
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+        )
+
         for _ in range(num_layers):
             conv = HeteroConv({
                 ('general_station', 'gen_to_gen', 'general_station'): 

@@ -1,0 +1,39 @@
+-----EPOCH: 1-----
+training: 100%|██████████| 546/546 [54:36<00:00,  6.00s/it]
+Validation: 100%|██████████| 546/546 [00:27<00:00, 19.91it/s]
+Train Loss: 8.5912
+Validation Loss: 18.3815
+-----EPOCH: 2-----
+training: 100%|██████████| 546/546 [54:56<00:00,  6.04s/it]
+Validation: 100%|██████████| 546/546 [00:28<00:00, 18.89it/s]
+Train Loss: 8.3162
+Validation Loss: 18.0994
+-----EPOCH: 3-----
+training: 100%|██████████| 546/546 [54:07<00:00,  5.95s/it]
+Validation: 100%|██████████| 546/546 [00:27<00:00, 19.83it/s]
+Train Loss: 8.2039
+Validation Loss: 18.5457
+-----EPOCH: 4-----
+training: 100%|██████████| 546/546 [53:44<00:00,  5.91s/it]
+Validation: 100%|██████████| 546/546 [00:27<00:00, 19.75it/s]
+Train Loss: 8.0344
+Validation Loss: 17.7501
+-----EPOCH: 5-----
+training: 100%|██████████| 546/546 [54:34<00:00,  6.00s/it]
+Validation: 100%|██████████| 546/546 [00:28<00:00, 19.02it/s]
+Train Loss: 7.9017
+Validation Loss: 19.0480
+-----EPOCH: 6-----
+training: 100%|██████████| 546/546 [54:20<00:00,  5.97s/it]
+Validation: 100%|██████████| 546/546 [00:27<00:00, 19.81it/s]
+Train Loss: 7.9165
+Validation Loss: 19.8114
+-----EPOCH: 7-----
+training: 100%|██████████| 546/546 [55:04<00:00,  6.05s/it]
+Validation: 100%|██████████| 546/546 [00:29<00:00, 18.44it/s]
+Early stop loss
+Training took 23082.908203840256 seconds over 7 epochs
+
+Pearson correlation (Test Stations): 0.6377820379183078
+Final Test RMSE (Test Stations): 0.8971194991493946
+TEST RMSE: 0.8971194991493946
