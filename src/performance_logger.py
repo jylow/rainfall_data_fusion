@@ -1,11 +1,40 @@
 import time
 import json
+from datetime import datetime
 
 class PerformanceLogger:
     def __init__(self, log_path="training_log.jsonl"):
         self.log_path = log_path
         self.epoch_logs = []
         self.best_val_loss = float("inf")
+
+    def log_grid_radius(self, data, radar_grid_nodes, radius_km, grid_shape, radar_to_gen_src, radar_to_rain_src):
+        """
+        Logs radar grid radius and connectivity information.
+
+        Parameters:
+            data (HeteroData): PyG heterograph with radar nodes and edges.
+            radar_grid_nodes (int): Number of radar grid nodes.
+            radius_km (float): Radius used to connect radar to stations.
+            grid_shape (tuple): Shape of the radar grid (height, width).
+            radar_to_gen_src (list): List of radar->general station edge sources.
+            radar_to_rain_src (list): List of radar->rainfall station edge sources.
+        """
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "radar_grid_nodes": radar_grid_nodes,
+            "grid_shape": grid_shape,
+            "radar_to_general_edges": len(radar_to_gen_src),
+            "radar_to_rain_edges": len(radar_to_rain_src),
+            "station_connection_radius_km": radius_km,
+            "grid_connection_radius_km": radius_km,
+        }
+
+        with open(self.log_path, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        print("Radar grid radius and connectivity info logged.")
+
     
     def log_model_config(self, config_dict: dict):
         record = {

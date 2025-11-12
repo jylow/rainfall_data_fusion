@@ -11,6 +11,7 @@ def stratified_spatial_sampling_dual(
     n_clusters=8,
     seed=42,
     plot=True,
+    output_path="dual_sampling_results.png",
 ):
     """
     Perform stratified spatial sampling using K-means clustering for both statistical and ML methods.
@@ -224,7 +225,218 @@ def stratified_spatial_sampling_dual(
     # Create visualization if requested
     if plot:
         create_dual_sampling_visualization(
-            results, station_coords, station_ids, cluster_labels, centroids
+            results, station_coords, station_ids, cluster_labels, centroids, output_path=output_path
         )
 
     return results
+
+def stratified_spatial_kfold_dual(
+    station_dict,
+    n_splits=5,
+    validation_percent=20,
+    n_clusters=8,
+    seed=42,
+    plot=False,
+):
+    """
+    Perform Spatial K-Fold Cross-Validation with stratified sampling using K-means clustering.
+    
+    Key feature: Ensures EXACTLY ONE test station per cluster per fold (when cluster size allows).
+    
+    Each fold has:
+      - Statistical method: train/test split (no overlap)
+      - ML method: train/validation/test split (same test as statistical)
+    The test sets across folds are disjoint (true K-fold CV).
+
+    Parameters
+    ----------
+    station_dict : dict
+        {station_id: [lat, lon]}
+    n_splits : int
+        Number of K-Fold splits (e.g., 5)
+    validation_percent : float
+        Percent of *training data* used for ML validation
+    n_clusters : int
+        Number of spatial clusters
+    seed : int
+        Random seed for reproducibility
+    plot : bool
+        Whether to visualize each fold
+
+    Returns
+    -------
+    folds : list of dict
+        Each dict contains:
+          {
+            'fold_index': int,
+            'statistical': {'train': [...], 'test': [...]},
+            'ml': {'train': [...], 'validation': [...], 'test': [...]},
+            'cluster_labels': [...],
+          }
+    """
+
+    # --- Step 1: Prepare data
+    station_ids = np.array(list(station_dict.keys()))
+    station_coords = np.array([[lon, lat] for lat, lon in station_dict.values()])
+    n_stations = len(station_ids)
+
+    print("=" * 80)
+    print("SPATIAL K-FOLD STRATIFIED SAMPLING (Fixed)")
+    print("=" * 80)
+    print(f"Total stations: {n_stations}")
+    print(f"Clusters: {n_clusters}")
+    print(f"Folds: {n_splits}")
+    print(f"Random seed: {seed}")
+    print("-" * 80)
+
+    # --- Step 2: K-Means clustering (done ONCE for consistency)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=seed, n_init=10)
+    cluster_labels = kmeans.fit_predict(station_coords)
+
+    # --- Step 3: Create rotation scheme for each cluster
+    # Ensures exactly 1 test station per cluster per fold (when possible)
+    np.random.seed(seed)
+    cluster_rotations = {}
+    
+    for cluster_id in range(n_clusters):
+        cluster_indices = np.where(cluster_labels == cluster_id)[0]
+        n_cluster = len(cluster_indices)
+        
+        # Shuffle stations in this cluster
+        shuffled_indices = cluster_indices.copy()
+        np.random.shuffle(shuffled_indices)
+        
+        # Create rotation: each fold gets exactly 1 test station (if cluster has >= n_splits stations)
+        # Remaining stations go to training pool
+        if n_cluster < n_splits:
+            print(f"WARNING: Cluster {cluster_id} has only {n_cluster} stations (< {n_splits} folds)")
+            # Pad with None for folds that won't get a test station from this cluster
+            test_rotation = list(shuffled_indices) + [None] * (n_splits - n_cluster)
+            train_pool = []
+        else:
+            # Each fold gets 1 test station, rest go to train pool
+            test_rotation = shuffled_indices[:n_splits].tolist()
+            train_pool = shuffled_indices[n_splits:].tolist()
+        
+        cluster_rotations[cluster_id] = {
+            'test_rotation': test_rotation,  # Length = n_splits
+            'train_pool': train_pool          # Stations never used for testing
+        }
+        
+        print(f"Cluster {cluster_id}: {n_cluster} stations → "
+              f"{len([x for x in test_rotation if x is not None])} test assignments, "
+              f"{len(train_pool)} always-train")
+
+    # --- Step 4: Build K-Fold splits
+    folds_results = []
+
+    for fold_idx in range(n_splits):
+        print(f"\n{'='*80}")
+        print(f"Creating Fold {fold_idx+1}/{n_splits}")
+        print(f"{'='*80}")
+
+        test_indices = []
+        train_indices = []
+
+        # Collect data for this fold
+        for cluster_id in range(n_clusters):
+            rotation = cluster_rotations[cluster_id]
+            
+            # Get the test station for this fold from this cluster
+            test_station = rotation['test_rotation'][fold_idx]
+            if test_station is not None:
+                test_indices.append(test_station)
+            
+            # Training pool: all stations NOT testing in this fold
+            for other_fold_idx in range(n_splits):
+                if other_fold_idx != fold_idx:
+                    other_test_station = rotation['test_rotation'][other_fold_idx]
+                    if other_test_station is not None:
+                        train_indices.append(other_test_station)
+            
+            # Add stations from train_pool (never used for testing)
+            train_indices.extend(rotation['train_pool'])
+
+        test_indices = np.array(test_indices)
+        train_indices = np.array(train_indices)
+
+        print(f"Test stations: {len(test_indices)} (should be ~{n_clusters})")
+        print(f"Train pool: {len(train_indices)}")
+
+        # --- Step 5: ML validation split (from training pool)
+        ml_train_indices = []
+        ml_val_indices = []
+
+        for cluster_id in range(n_clusters):
+            cluster_mask = cluster_labels == cluster_id
+            cluster_train_indices = [idx for idx in train_indices if cluster_mask[idx]]
+            n_cluster_train = len(cluster_train_indices)
+
+            if n_cluster_train == 0:
+                continue
+
+            # Shuffle and split
+            np.random.seed(seed + 100 + fold_idx + cluster_id)
+            shuffled = np.random.permutation(cluster_train_indices)
+            n_val = max(1, int(len(shuffled) * validation_percent / 100)) if n_cluster_train > 1 else 0
+            cluster_val = shuffled[:n_val]
+            cluster_ml_train = shuffled[n_val:]
+
+            ml_train_indices.extend(cluster_ml_train)
+            ml_val_indices.extend(cluster_val)
+
+        # --- Step 6: Convert to station IDs
+        test_stations = station_ids[test_indices]
+        stat_train_stations = station_ids[train_indices]
+        ml_train_stations = station_ids[ml_train_indices]
+        ml_val_stations = station_ids[ml_val_indices]
+
+        # --- Step 7: Store results
+        fold_result = {
+            "fold_index": fold_idx,
+            "statistical": {
+                "train": stat_train_stations,
+                "test": test_stations,
+            },
+            "ml": {
+                "train": ml_train_stations,
+                "validation": ml_val_stations,
+                "test": test_stations,
+            },
+            "test_stations": test_stations,
+            "cluster_labels": cluster_labels,
+        }
+
+        folds_results.append(fold_result)
+
+        print(f"Fold {fold_idx+1} summary:")
+        print(f"  Statistical train: {len(stat_train_stations)} "
+              f"({len(stat_train_stations)/n_stations*100:.1f}%)")
+        print(f"  Test: {len(test_stations)} ({len(test_stations)/n_stations*100:.1f}%)")
+        print(f"  ML train: {len(ml_train_stations)} ({len(ml_train_stations)/n_stations*100:.1f}%)")
+        print(f"  ML validation: {len(ml_val_stations)} ({len(ml_val_stations)/n_stations*100:.1f}%)")
+
+        if plot:
+            create_dual_sampling_visualization(
+                fold_result, station_coords, station_ids, cluster_labels, 
+                kmeans.cluster_centers_, 
+                output_path=f"fold_{fold_idx+1}_sampling_results.png"
+            )
+
+    # --- Verification: Ensure no station appears in multiple test sets
+    print(f"\n{'='*80}")
+    print("VERIFICATION")
+    print(f"{'='*80}")
+    all_test_stations = set()
+    for fold in folds_results:
+        fold_test = set(fold['test_stations'])
+        overlap = all_test_stations & fold_test
+        if overlap:
+            print(f"ERROR: Fold {fold['fold_index']+1} has overlapping test stations: {overlap}")
+        all_test_stations.update(fold_test)
+    
+    print(f"Total unique test stations across all folds: {len(all_test_stations)}")
+    print(f"Expected: {min(n_clusters * n_splits, n_stations)}")
+    print("✓ K-Fold validation complete!")
+
+    return folds_results

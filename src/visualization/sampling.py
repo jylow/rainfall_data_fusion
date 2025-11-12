@@ -6,7 +6,12 @@ from src.visualization.main import visualise_singapore_outline, visualise_with_b
 
 
 def create_dual_sampling_visualization(
-    results, station_coords, station_ids, cluster_labels, centroids
+    results,
+    station_coords,
+    station_ids,
+    cluster_labels,
+    centroids,
+    output_path="dual_sampling_results.png",
 ):
     """Create comprehensive visualization of the dual sampling strategy."""
 
@@ -157,8 +162,8 @@ def create_dual_sampling_visualization(
     ax3.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig("dual_sampling_results.png", dpi=300, bbox_inches="tight")
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"\n{'=' * 70}")
-    print("Visualization saved as 'dual_sampling_results.png'")
+    print(f"Visualization saved as {output_path}")
     print(f"{'=' * 70}")
     plt.show()
