@@ -52,6 +52,8 @@ def add_weather_station_data(
     data,
     general_station_features,
     rainfall_station_features,
+    general_station_ids=None,
+    rainfall_station_ids=None,
     dtype=torch.float32,
 ):
     data["general_station"].x = torch.tensor(
@@ -69,10 +71,27 @@ def add_weather_station_data(
         np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
     )
 
+    # --- Add station IDs ---
+    if general_station_ids is not None:
+        data["general_station"].station_ids = np.array(general_station_ids)
+    else:
+        data["general_station"].station_ids = np.arange(
+            np.array(general_station_features).shape[0]
+        )
+
+    if rainfall_station_ids is not None:
+        data["rainfall_station"].station_ids = np.array(rainfall_station_ids)
+    else:
+        data["rainfall_station"].station_ids = np.arange(
+            np.array(rainfall_station_features).shape[0]
+        )
+
     print(data)
     print("\n=== Station Features Added ===")
     print(f"General station features shape: {data['general_station'].x.shape}")
     print(f"Rainfall station features shape: {data['rainfall_station'].x.shape}")
+    print(f"General station IDs: {data['general_station'].station_ids[:5]}")
+    print(f"Rainfall station IDs: {data['rainfall_station'].station_ids[:5]}")
 
     return data
 
