@@ -166,12 +166,14 @@ def generate_edges(
 
     # Add station coordinates for nx plotting
     for idx, station in enumerate(general_station + rainfall_station):
+        sid = int(station[1:])
         G.add_node(
             idx,
             pos=(
                 weather_station_locations[station][1],
                 weather_station_locations[station][0],
             ),
+            label=station,
         )
 
     color_map = ["green" for i in range(len(general_station))] + [
@@ -235,7 +237,8 @@ def generate_edges(
 
     print(f"\nGraph info: {G}")
     print(f"Connected components: {len(list(nx.connected_components(G)))}")
-    nx.draw(G, nx.get_node_attributes(G, 'pos'), node_color = color_map, with_labels=True, font_weight='bold')
+    labels = nx.get_node_attributes(G, 'label')
+    nx.draw(G, nx.get_node_attributes(G, 'pos'), node_color = color_map, with_labels=True, font_weight='bold', labels=labels)
 
     # Convert edge lists to proper format
     for key, val in edges.items():
