@@ -332,7 +332,7 @@ def stratified_spatial_kfold_dual(
 
     for fold_idx in range(n_splits):
         print(f"\n{'='*80}")
-        print(f"Creating Fold {fold_idx+1}/{n_splits}")
+        print(f"Creating Fold {fold_idx}/{n_splits}")
         print(f"{'='*80}")
 
         test_indices = []
