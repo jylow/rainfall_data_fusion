@@ -4,6 +4,7 @@ from torch.nn import Sequential as Seq
 from torch_geometric.nn import ChebConv, TAGConv, GATConv
 from torch import Tensor
 from torch.linalg import vector_norm
+import torch.nn.functional as F
 
 import torch_geometric.transforms as T
 from torch_geometric.nn import SAGEConv, GINEConv, to_hetero, HeteroConv, GCNConv, GATConv, Linear, GraphConv
@@ -35,6 +36,15 @@ class HeteroGNN(torch.nn.Module):
         
         self.lin_rainfall = Linear(hidden_channels, out_channels)
         self.lin_general = Linear(hidden_channels, out_channels)
+
+        # Add layer normalization
+        self.norm_general = torch.nn.LayerNorm(hidden_channels)
+        self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
+
+        # torch.nn.init.xavier_uniform_(self.lin_rainfall.weight)
+        # torch.nn.init.xavier_uniform_(self.lin_general.weight)
+        # torch.nn.init.constant_(self.lin_rainfall.bias, 1.0)
+        # torch.nn.init.constant_(self.lin_general.bias, 1.0)
     
     def forward(self, x_dict, edge_index_dict, edge_attributes_dict):
         # Initialize with zeros so first layer only gets neighbor info
@@ -44,12 +54,22 @@ class HeteroGNN(torch.nn.Module):
         for conv in self.convs:
             h_dict = conv({key: x for key, x in x_dict.items()}, 
                             edge_index_dict, edge_attributes_dict)
+            # # Use Leaky ReLU in hidden layers
+            # h_dict = {key: F.leaky_relu(x, negative_slope=0.01) for key, x in h_dict.items()}
             h_dict = {key: x.relu() for key, x in h_dict.items()}
         
+        # # Normalize before output layer
+        # h_gen_norm = self.norm_general(h_dict['general_station'])
+        # h_rain_norm = self.norm_rainfall(h_dict['rainfall_station'])
+
+        # return {
+        #     'general_station': F.softplus(self.lin_general(h_gen_norm)),
+        #     'rainfall_station': F.softplus(self.lin_rainfall(h_rain_norm))
+        # }
         
         return {
-            'general_station': self.lin_general(h_dict['general_station']),
-            'rainfall_station': self.lin_rainfall(h_dict['rainfall_station'])
+            'general_station': F.relu(self.lin_general(h_dict['general_station'])),
+            'rainfall_station': F.relu(self.lin_rainfall(h_dict['rainfall_station']))
         }
     
 class HeteroGNN2(torch.nn.Module):
