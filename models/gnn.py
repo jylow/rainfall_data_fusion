@@ -21,6 +21,7 @@ class HeteroGNN(torch.nn.Module):
             num_layers=num_layers,
         )
 
+
         for _ in range(num_layers):
             conv = HeteroConv({
                 ('general_station', 'gen_to_gen', 'general_station'): 
@@ -159,6 +160,8 @@ class HeteroGCNGNN(torch.nn.Module):
             'general_station': self.lin_general(x_dict['general_station']),
             'rainfall_station': self.lin_rainfall(x_dict['rainfall_station'])
         }
+    
+    
 
 class HeteroSAGEGNN(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_layers):
@@ -193,3 +196,45 @@ class HeteroSAGEGNN(torch.nn.Module):
             'general_station': self.lin_general(x_dict['general_station']),
             'rainfall_station': self.lin_rainfall(x_dict['rainfall_station'])
         }
+    
+
+class GNN(torch.nn.Module):
+    def __init__(self, hidden_channels, out_channels, num_layers):
+        super().__init__()
+        self.convs = torch.nn.ModuleList()
+        # store constructor arguments
+        self.config = dict(
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+        )
+
+
+        for _ in range(num_layers):
+            conv = GraphConv((-1, -1), hidden_channels)
+            self.convs.append(conv)
+        
+        self.lin_rainfall = Linear(hidden_channels, out_channels)
+        self.lin_general = Linear(hidden_channels, out_channels)
+
+        # Add layer normalization
+        self.norm_general = torch.nn.LayerNorm(hidden_channels)
+        self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
+
+        # torch.nn.init.xavier_uniform_(self.lin_rainfall.weight)
+        # torch.nn.init.xavier_uniform_(self.lin_general.weight)
+        # torch.nn.init.constant_(self.lin_rainfall.bias, 1.0)
+        # torch.nn.init.constant_(self.lin_general.bias, 1.0)
+
+    def forward(self, x, edge_index, edge_attributes):
+        # First layer: aggregate from original features
+        for conv in self.convs:
+            x = conv(x, edge_index, edge_attributes)
+            x = x.relu()
+
+        
+        # # Normalize before output layer
+        # h_gen_norm = self.norm_general(h_dict['general_station'])
+        # h_rain_norm = self.norm_rainfall(h_dict['rainfall_station'])
+        return F.relu(self.lin_general(x))
+            

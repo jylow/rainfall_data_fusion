@@ -1,4 +1,4 @@
-from dataset.weather_graph_dataset import WeatherGraphDataset, WeatherGraphDatasetNew
+from dataset.weather_graph_dataset import WeatherGraphDataset, WeatherGraphDatasetNew, HomogeneousWeatherGraphDatasetNew
 from src.miscellaneous import get_straight_distance
 import xarray as xr
 import rasterio
@@ -47,6 +47,40 @@ def read_nc_file(filepath: str):
 
     return data
 
+def add_homogeneous_weather_station_data(
+    data,
+    general_station_features,
+    rainfall_station_features,
+    general_station_ids=None,
+    rainfall_station_ids=None,
+    dtype=torch.float32,
+):
+
+    general_station_data_tensor = torch.tensor(
+        np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
+    )
+    rainfall_station_data_tensor = torch.tensor(
+        np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
+    )
+
+    # Add station targets
+    general_station_target_tensor = torch.tensor(
+        np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
+    )
+    rainfall_station_target_tensor = torch.tensor(
+        np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
+    )
+
+    station_data_tensor = torch.concat([general_station_data_tensor, rainfall_station_data_tensor], dim=1)
+    station_target_tensor = torch.concat([general_station_target_tensor, rainfall_station_target_tensor], dim = 1)
+    data.x = station_data_tensor
+    data.y = station_target_tensor
+
+    print(data)
+    print("\n=== Station Features Added ===")
+    print(f"Station features shape: {data.x.shape}")
+
+    return data
 
 def add_weather_station_data(
     data,
@@ -55,10 +89,16 @@ def add_weather_station_data(
     general_station_ids=None,
     rainfall_station_ids=None,
     dtype=torch.float32,
+    include_metastation_info=True,
 ):
-    data["general_station"].x = torch.tensor(
-        np.array(general_station_features).transpose(1, 0, 2), dtype=dtype
-    )
+    if include_metastation_info:
+        data["general_station"].x = torch.tensor(
+            np.array(general_station_features).transpose(1, 0, 2), dtype=dtype
+        )
+    else: 
+        data["general_station"].x = torch.tensor(
+            np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
+        )
     data["rainfall_station"].x = torch.tensor(
         np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
     )
@@ -124,6 +164,19 @@ def add_mask_to_data(data, split_info, general_station, rainfall_station):
             data["rainfall_station"].train_mask, data["rainfall_station"].val_mask
         )
     ]
+    return data
+
+def add_homogeneous_mask_to_data(data, split_info, stations):
+    data.train_mask = [
+        1 if station in split_info['ml']['train'] else 0 for station in stations
+    ]
+    data.val_mask = [
+        1 if station in split_info['ml']['validation'] else 0 for station in stations
+    ]
+    data.test_mask = [
+        1 if station in split_info['ml']['test'] else 0 for station in stations
+    ]
+
     return data
 
 
@@ -252,6 +305,79 @@ def generate_edges(
     return edges, edge_attributes
 
 
+def generate_homogeneous_edges(
+    weather_station_locations,
+    stations,
+    K=4,
+):
+    ids = stations
+    print(f"\nTotal stations for KNN: {len(ids)}")
+    print(ids)
+
+    coordinates = []
+    for id in ids:
+        coordinates.append(weather_station_locations[id])
+    coords = np.array(coordinates)
+    print(coords)
+
+    knn = NearestNeighbors(n_neighbors=K + 1, algorithm="ball_tree")
+    knn.fit(coords)
+
+    distances, indices = knn.kneighbors(coords)
+
+    G = nx.Graph()
+
+    edges = []
+
+    edge_attributes = []
+    # Add station coordinates for nx plotting
+    for idx, station in enumerate(stations):
+        sid = int(station[1:])
+        G.add_node(
+            idx,
+            pos=(
+                weather_station_locations[station][1],
+                weather_station_locations[station][0],
+            ),
+            label=station,
+        )
+
+    color_map = ["green" for i in range(len(stations))]
+
+    # Build edges
+    for idx, row in enumerate(indices):
+        origin = row[0]
+
+        for n in row[1:]:
+            G.add_edge(origin, n)
+
+            edges.append([origin, n])
+            edge_attributes.append(
+                [
+                    get_straight_distance(
+                        weather_station_locations[ids[origin]],
+                        weather_station_locations[ids[n]],
+                    )
+                ]
+            )
+          
+
+    print(f"\nGraph info: {G}")
+    print(f"Connected components: {len(list(nx.connected_components(G)))}")
+    labels = nx.get_node_attributes(G, 'label')
+    nx.draw(G, nx.get_node_attributes(G, 'pos'), node_color = color_map, with_labels=True, font_weight='bold', labels=labels)
+
+    # Convert edge lists to proper format
+    # for key, val in edges.items():
+    #     xarr = []
+    #     yarr = []
+    #     for x, y in val:
+    #         xarr.append(x)
+    #         yarr.append(y)
+    #     edges[key] = [xarr, yarr]
+
+    return edges, edge_attributes
+
 def add_edge_attributes_to_data(
     data,
     edges,
@@ -286,6 +412,22 @@ def add_edge_attributes_to_data(
         "rainfall_station", "rain_to_rain", "rainfall_station"
     ].edge_attr = torch.tensor(edge_attributes["rainfall_to_rainfall"], dtype=dtype)
 
+    print("\n=== Station-to-Station Edges Added ===")
+    return data
+
+def add_homogeneous_edge_attributes_to_data(
+    data,
+    edges,
+    edge_attributes,
+    dtype=torch.float32,
+):
+    # Add station-to-station edges
+    data.edge_index = torch.tensor(edges, dtype=torch.long).transpose(0,1)
+
+    # Add edge attributes
+    data.edge_attr = torch.tensor(
+        edge_attributes, dtype=dtype
+    ).transpose(0,1)
     print("\n=== Station-to-Station Edges Added ===")
     return data
 
@@ -369,6 +511,22 @@ def collate_temporal_graphs_new(batch):
       'edge_attr_dict': edge_attribute_dict
   }
 
+def collate_homogeneous_graphs_new(batch):
+  x = torch.stack([item['x'] for item in batch])
+  y = torch.stack([item['y'] for item in batch])
+
+  mask = batch[0]['mask']
+  edge_index = batch[0]['edge_index']
+  edge_attribute = batch[0]['edge_attr']
+
+  return {
+      'x': x,
+      'y': y,
+      'mask': mask,
+      'edge_index': edge_index,
+      'edge_attr': edge_attribute
+  }
+
 
 def prepare_dataset_new(data, batch_size=16):
     train_dataset = WeatherGraphDatasetNew(data, mode="train")
@@ -384,5 +542,23 @@ def prepare_dataset_new(data, batch_size=16):
         batch_size=batch_size,
         shuffle=False,
         collate_fn=collate_temporal_graphs_new,
+    )
+    return train_loader, val_loader
+
+def prepare_homogeneous_dataset(data, batch_size=16):
+
+    train_dataset = HomogeneousWeatherGraphDatasetNew(data, mode="train")
+    val_dataset = HomogeneousWeatherGraphDatasetNew(data, mode="val")
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_homogeneous_graphs_new
+    )
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_homogeneous_graphs_new
     )
     return train_loader, val_loader

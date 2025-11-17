@@ -53,7 +53,7 @@ def load_weather_station_dataset(
     gauge_df["time_sgt"] = gauge_df["time_sgt"].apply(
         lambda x: datetime.strptime(x, "%Y-%m-%dT%H:%M:00+08:00")
     )
-    # gauge_df['time_sgt'] = gauge_df['time_sgt'].apply(lambda x : datetime.strptime(x, '%Y-%m-%d %H:%M:00'))
+    #gauge_df['time_sgt'] = gauge_df['time_sgt'].apply(lambda x : datetime.strptime(x, '%Y-%m-%d %H:%M:00'))
 
     # convert to table with stations as columns
     filtered_res = gauge_df
