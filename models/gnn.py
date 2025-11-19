@@ -227,6 +227,9 @@ class GNN(torch.nn.Module):
         # torch.nn.init.constant_(self.lin_general.bias, 1.0)
 
     def forward(self, x, edge_index, edge_attributes):
+        if x.dim() != 2:
+            raise ValueError(f"GNN.forward expects x with shape [N, F], got {x.shape}")
+
         # First layer: aggregate from original features
         for conv in self.convs:
             x = conv(x, edge_index, edge_attributes)
@@ -238,3 +241,33 @@ class GNN(torch.nn.Module):
         # h_rain_norm = self.norm_rainfall(h_dict['rainfall_station'])
         return F.relu(self.lin_general(x))
             
+class GNNInductive(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels, num_layers):
+        super().__init__()
+        self.config = dict(
+            in_channels=in_channels,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+        )
+        
+        self.convs = torch.nn.ModuleList()
+        self.convs.append(GraphConv(in_channels, hidden_channels))
+        
+        for _ in range(num_layers - 1):
+            self.convs.append(GraphConv(hidden_channels, hidden_channels))
+        
+        self.lin_general = Linear(hidden_channels, out_channels)
+
+    def forward(self, x, edge_index, edge_attributes=None):
+        """
+        IMPORTANT: GraphConv only takes (x, edge_index, edge_weight)
+        """
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index)
+            
+            x = F.relu(x)
+        
+        out = self.lin_general(x)
+        
+        return out
