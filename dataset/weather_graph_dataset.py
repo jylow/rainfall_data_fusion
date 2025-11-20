@@ -200,6 +200,7 @@ class HomogeneousWeatherGraphDatasetInductive(Dataset):
             edge_attr=self.graph.edge_attr if hasattr(self.graph, 'edge_attr') else None,
             mask=self.mask,  # Nodes to train on
             train_mask=self.graph.train_mask,  # For masking features
+            station_id = self.graph.orig_id,
         )
         
         return data

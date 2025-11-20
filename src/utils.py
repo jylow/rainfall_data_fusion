@@ -180,235 +180,6 @@ def add_weather_station_data(
     return data
 
 
-def build_train_and_full_graph_homogeneous(
-    data,
-    split_info,
-    stations_ids,
-):
-    """
-    Builds for a HOMOGENEOUS graph:
-      1. full_graph (all nodes, with masks only)
-      2. train_graph (train + val nodes only, test nodes removed)
-
-    Assumes data.x and data.y are (T, N, F)
-    """
-
-    # 1. Build full_graph (all nodes) and add masks
-    # -------------------------------------------------
-    # print("before cloning, edge_index:", data.edge_index.shape)
-    # print("before cloning, edge_attr:", data.edge_attr.shape)
-
-    full_graph = data.clone()
-    all_station_ids_list = list(stations_ids)
-
-    # Create sets for fast O(1) lookups
-    train_set = set(split_info["ml"]["train"])
-    val_set = set(split_info["ml"]["validation"])
-
-    # Build boolean masks that align with the node order (0...N_total-1)
-    train_mask = torch.tensor(
-        [sid in train_set for sid in all_station_ids_list], dtype=torch.bool
-    )
-    val_mask = torch.tensor(
-        [sid in val_set for sid in all_station_ids_list], dtype=torch.bool
-    )
-    # Test mask is everything not in train or val
-    test_mask = ~(train_mask | val_mask)
-
-    # Assign masks to the homogeneous graph
-    full_graph.train_mask = train_mask
-    full_graph.val_mask = val_mask
-    full_graph.test_mask = test_mask
-
-    # 2. Build train_graph (subgraph)
-    # -------------------------------------------------
-    train_graph = data.clone()
-
-    # Get the mask for all nodes to KEEP (train + val)
-    # keep_nodes_mask = full_graph.train_mask | full_graph.val_mask
-    keep_nodes_mask = full_graph.train_mask
-    num_total_nodes = len(keep_nodes_mask)
-
-    # --- Filter Node Features (Spatio-Temporal Aware) ---
-    # We must filter on dimension 1 (the Node dimension)
-    # (T, N_total, F) -> (T, N_sub, F)
-    train_graph.x = train_graph.x[:, keep_nodes_mask, :]
-    train_graph.y = train_graph.y[:, keep_nodes_mask, :]
-
-    # --- Filter other node-level attributes ---
-    # We also filter the masks themselves so they align with the new graph
-    train_graph.train_mask = full_graph.train_mask[keep_nodes_mask]
-    train_graph.val_mask = full_graph.val_mask[keep_nodes_mask]
-    train_graph.test_mask = full_graph.test_mask[keep_nodes_mask]  # (will be all False)
-
-    # --- Save mapping from new index (0..N_sub-1) to old index (0..N_total-1) ---
-    # This is critical for mapping predictions back to the full graph
-    train_graph.orig_id = torch.arange(num_total_nodes)[keep_nodes_mask]
-
-    # --- Filter Edges (The PyG Way) ---
-    # Use the 'subgraph' utility to:
-    # 1. Select only edges where both nodes are in `keep_nodes_mask`
-    # 2. Relabel node indices in edge_index from (0..N_total-1) to (0..N_sub-1)
-
-    new_edge_index, new_edge_attr, edge_mask = subgraph(
-        subset=keep_nodes_mask,
-        edge_index=train_graph.edge_index,
-        relabel_nodes=True,
-        num_nodes=num_total_nodes,
-        return_edge_mask=True,
-    )
-
-    train_graph.edge_index = new_edge_index
-
-    # Also filter edge attributes if they exist
-    if hasattr(train_graph, "edge_attr") and train_graph.edge_attr is not None:
-        train_graph.edge_attr = train_graph.edge_attr[:, edge_mask]
-
-    # 3. Build validation_graph (subgraph)
-    # -------------------------------------------------
-    validation_graph = data.clone()
-
-    # Get the mask for all nodes to KEEP (train + val)
-    keep_nodes_mask = full_graph.train_mask | full_graph.val_mask
-    num_total_nodes = len(keep_nodes_mask)
-
-    # --- Filter Node Features (Spatio-Temporal Aware) ---
-    # We must filter on dimension 1 (the Node dimension)
-    # (T, N_total, F) -> (T, N_sub, F)
-    validation_graph.x = validation_graph.x[:, keep_nodes_mask, :]
-    validation_graph.y = validation_graph.y[:, keep_nodes_mask, :]
-
-    # --- Filter other node-level attributes ---
-    # We also filter the masks themselves so they align with the new graph
-    validation_graph.train_mask = full_graph.train_mask[keep_nodes_mask]
-    validation_graph.val_mask = full_graph.val_mask[keep_nodes_mask]
-    validation_graph.test_mask = full_graph.test_mask[keep_nodes_mask]  # (will be all False)
-
-    # --- Save mapping from new index (0..N_sub-1) to old index (0..N_total-1) ---
-    # This is critical for mapping predictions back to the full graph
-    validation_graph.orig_id = torch.arange(num_total_nodes)[keep_nodes_mask]
-
-    # --- Filter Edges (The PyG Way) ---
-    # Use the 'subgraph' utility to:
-    # 1. Select only edges where both nodes are in `keep_nodes_mask`
-    # 2. Relabel node indices in edge_index from (0..N_total-1) to (0..N_sub-1)
-
-    new_edge_index, new_edge_attr, edge_mask = subgraph(
-        subset=keep_nodes_mask,
-        edge_index=validation_graph.edge_index,
-        relabel_nodes=True,
-        num_nodes=num_total_nodes,
-        return_edge_mask=True,
-    )
-
-    validation_graph.edge_index = new_edge_index
-
-    # Also filter edge attributes if they exist
-    if hasattr(validation_graph, "edge_attr") and validation_graph.edge_attr is not None:
-        validation_graph.edge_attr = validation_graph.edge_attr[:, edge_mask]
-
-    # print("after processing, train edge_index:", train_graph.edge_index.shape)
-    # print("after processing, train edge_attr:", train_graph.edge_attr.shape)
-    # print("after processing, full edge_index:", full_graph.edge_index.shape)
-    # print("after processing, full edge_attr:", full_graph.edge_attr.shape)
-
-    return train_graph, validation_graph, full_graph
-
-
-def build_train_and_full_graph(
-    data, split_info, general_station_ids, rainfall_station_ids
-):
-    """
-    Builds:
-      1. full_graph (all nodes, with masks only)
-      2. train_graph (train + val nodes only, test nodes removed)
-    """
-
-    # Clone original graph
-    full_graph = data.clone()
-
-    # Masks --------------------------
-    full_graph["general_station"].train_mask = torch.tensor(
-        [1 if sid in split_info["ml"]["train"] else 0 for sid in general_station_ids]
-    )
-    full_graph["general_station"].val_mask = torch.tensor(
-        [
-            1 if sid in split_info["ml"]["validation"] else 0
-            for sid in general_station_ids
-        ]
-    )
-    full_graph["general_station"].test_mask = 1 - (
-        full_graph["general_station"].train_mask
-        | full_graph["general_station"].val_mask
-    )
-
-    full_graph["rainfall_station"].train_mask = torch.tensor(
-        [1 if sid in split_info["ml"]["train"] else 0 for sid in rainfall_station_ids]
-    )
-    full_graph["rainfall_station"].val_mask = torch.tensor(
-        [
-            1 if sid in split_info["ml"]["validation"] else 0
-            for sid in rainfall_station_ids
-        ]
-    )
-    full_graph["rainfall_station"].test_mask = 1 - (
-        full_graph["rainfall_station"].train_mask
-        | full_graph["rainfall_station"].val_mask
-    )
-
-    # --------------------------------------------
-    # Build train_graph by KEEPING train+val nodes
-    # --------------------------------------------
-    train_graph = data.clone()
-
-    keep_gen = (
-        full_graph["general_station"].train_mask
-        | full_graph["general_station"].val_mask
-    ).bool()
-    keep_rain = (
-        full_graph["rainfall_station"].train_mask
-        | full_graph["rainfall_station"].val_mask
-    ).bool()
-
-    # Filter node features
-    train_graph["general_station"].x = train_graph["general_station"].x[keep_gen]
-    train_graph["general_station"].y = train_graph["general_station"].y[keep_gen]
-
-    train_graph["rainfall_station"].x = train_graph["rainfall_station"].x[keep_rain]
-    train_graph["rainfall_station"].y = train_graph["rainfall_station"].y[keep_rain]
-
-    # Save mapping (very important)
-    train_graph["general_station"].orig_id = torch.arange(len(keep_gen))[keep_gen]
-    train_graph["rainfall_station"].orig_id = torch.arange(len(keep_rain))[keep_rain]
-
-    # Filter edges based on retained nodes
-    new_edge_index_dict = {}
-    for (src, rel, dst), edge_index in train_graph.edge_index_dict.items():
-        if src == "general_station":
-            src_mask = keep_gen
-        elif src == "rainfall_station":
-            src_mask = keep_rain
-        else:
-            src_mask = torch.ones(train_graph[src].num_nodes, dtype=bool)
-
-        if dst == "general_station":
-            dst_mask = keep_gen
-        elif dst == "rainfall_station":
-            dst_mask = keep_rain
-        else:
-            dst_mask = torch.ones(train_graph[dst].num_nodes, dtype=bool)
-
-        # Keep edges where both endpoints survive
-        keep_edges = src_mask[edge_index[0]] & dst_mask[edge_index[1]]
-        new_edge_index = edge_index[:, keep_edges]
-
-        new_edge_index_dict[(src, rel, dst)] = new_edge_index
-
-    train_graph.edge_index_dict = new_edge_index_dict
-
-    return train_graph, full_graph
-
-
 def add_mask_to_data(data, split_info, general_station, rainfall_station):
     data["general_station"].train_mask = [
         1 if station in split_info["ml"]["train"] else 0 for station in general_station
@@ -817,6 +588,7 @@ def collate_homogeneous_graphs_new(batch):
         "edge_attr": edge_attribute,
     }
 
+
 def inductive_collate_fn(batch):
     """
     Collate function for inductive weather graph dataset.
@@ -911,7 +683,9 @@ def prepare_homogeneous_inductive_dataset(
         train_dataset = HomogeneousWeatherGraphDatasetInductive(
             train_graph, mode="train"
         )
-        val_dataset = HomogeneousWeatherGraphDatasetInductive(validation_graph, mode="val")
+        val_dataset = HomogeneousWeatherGraphDatasetInductive(
+            validation_graph, mode="val"
+        )
 
         # Inspect one sample
         sample = train_dataset[0]
@@ -938,9 +712,9 @@ def prepare_homogeneous_inductive_dataset(
 
         # Verify batch shapes
         sample_batch = next(iter(train_loader))
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("BATCH VERIFICATION")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"Batch content: {sample_batch}")
         print(f"Batched x shape: {sample_batch.x.shape}")  # [B*N, F]
         print(f"Batched y shape: {sample_batch.y.shape}")  # [B*N, Tgt]
@@ -948,7 +722,7 @@ def prepare_homogeneous_inductive_dataset(
         print(f"Edge index shape: {sample_batch.edge_index.shape}")
         print(f"Batch vector shape: {sample_batch.batch.shape}")
         print(f"Num graphs in batch: {sample_batch.num_graphs}")
-        
+
         # Calculate expected single graph node count
         nodes_per_graph = sample_batch.x.shape[0] // sample_batch.num_graphs
         masks_per_graph = sample_batch.mask.shape[0] // sample_batch.num_graphs
@@ -983,6 +757,7 @@ def prepare_homogeneous_inductive_dataset(
     else:
         raise ValueError(f"Invalid mode: {mode}. Must be 'train' or 'test'")
 
+
 def debug_dataloader(dataloader, num_batches=1):
     """
     Print shapes of a few batches to debug.
@@ -990,10 +765,10 @@ def debug_dataloader(dataloader, num_batches=1):
     for batch_idx, batch in enumerate(dataloader):
         if batch_idx >= num_batches:
             break
-        
-        print(f"\n{'='*60}")
+
+        print(f"\n{'=' * 60}")
         print(f"Batch {batch_idx}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"batch.x shape: {batch.x.shape}")  # Should be [B*N, F]
         print(f"batch.y shape: {batch.y.shape}")  # Should be [B*N, Tgt]
         print(f"batch.mask shape: {batch.mask.shape}")  # Should be [N] NOT [B*N]!
@@ -1003,3 +778,239 @@ def debug_dataloader(dataloader, num_batches=1):
         print(f"\nExpected single node count: {batch.x.shape[0] // batch.num_graphs}")
         print(f"Actual mask size: {batch.mask.shape[0]}")
         print(f"Match: {batch.mask.shape[0] == batch.x.shape[0] // batch.num_graphs}")
+
+
+def build_train_and_full_graph_homogeneous(
+    data,
+    split_info,
+    stations_ids,
+):
+    """
+    Builds for a HOMOGENEOUS graph:
+      1. full_graph (all nodes, with masks only)
+      2. train_graph (train + val nodes only, test nodes removed)
+
+    Assumes data.x and data.y are (T, N, F)
+    """
+
+    # 1. Build full_graph (all nodes) and add masks
+    # -------------------------------------------------
+    # print("before cloning, edge_index:", data.edge_index.shape)
+    # print("before cloning, edge_attr:", data.edge_attr.shape)
+
+    full_graph = data.clone()
+    all_station_ids_list = list(stations_ids)
+
+    # Create sets for fast O(1) lookups
+    train_set = set(split_info["ml"]["train"])
+    val_set = set(split_info["ml"]["validation"])
+
+    # Build boolean masks that align with the node order (0...N_total-1)
+    train_mask = torch.tensor(
+        [sid in train_set for sid in all_station_ids_list], dtype=torch.bool
+    )
+    val_mask = torch.tensor(
+        [sid in val_set for sid in all_station_ids_list], dtype=torch.bool
+    )
+    # Test mask is everything not in train or val
+    test_mask = ~(train_mask | val_mask)
+
+    full_graph.orig_id = torch.arange(len(all_station_ids_list))
+
+    # Assign masks to the homogeneous graph
+    full_graph.train_mask = train_mask
+    full_graph.val_mask = val_mask
+    full_graph.test_mask = test_mask
+
+    # 2. Build train_graph (subgraph)
+    # -------------------------------------------------
+    train_graph = data.clone()
+
+    # Get the mask for all nodes to KEEP (train + val)
+    # keep_nodes_mask = full_graph.train_mask | full_graph.val_mask
+    keep_nodes_mask = full_graph.train_mask
+    num_total_nodes = len(keep_nodes_mask)
+
+    # --- Filter Node Features (Spatio-Temporal Aware) ---
+    # We must filter on dimension 1 (the Node dimension)
+    # (T, N_total, F) -> (T, N_sub, F)
+    train_graph.x = train_graph.x[:, keep_nodes_mask, :]
+    train_graph.y = train_graph.y[:, keep_nodes_mask, :]
+
+    # --- Filter other node-level attributes ---
+    # We also filter the masks themselves so they align with the new graph
+    train_graph.train_mask = full_graph.train_mask[keep_nodes_mask]
+    train_graph.val_mask = full_graph.val_mask[keep_nodes_mask]
+    train_graph.test_mask = full_graph.test_mask[keep_nodes_mask]  # (will be all False)
+
+    # --- Save mapping from new index (0..N_sub-1) to old index (0..N_total-1) ---
+    # This is critical for mapping predictions back to the full graph
+    train_graph.orig_id = torch.arange(num_total_nodes)[keep_nodes_mask]
+
+    # --- Filter Edges (The PyG Way) ---
+    # Use the 'subgraph' utility to:
+    # 1. Select only edges where both nodes are in `keep_nodes_mask`
+    # 2. Relabel node indices in edge_index from (0..N_total-1) to (0..N_sub-1)
+
+    new_edge_index, new_edge_attr, edge_mask = subgraph(
+        subset=keep_nodes_mask,
+        edge_index=train_graph.edge_index,
+        relabel_nodes=True,
+        num_nodes=num_total_nodes,
+        return_edge_mask=True,
+    )
+
+    train_graph.edge_index = new_edge_index
+
+    # Also filter edge attributes if they exist
+    if hasattr(train_graph, "edge_attr") and train_graph.edge_attr is not None:
+        train_graph.edge_attr = train_graph.edge_attr[:, edge_mask]
+
+    # 3. Build validation_graph (subgraph)
+    # -------------------------------------------------
+    validation_graph = data.clone()
+
+    # Get the mask for all nodes to KEEP (train + val)
+    keep_nodes_mask = full_graph.train_mask | full_graph.val_mask
+    num_total_nodes = len(keep_nodes_mask)
+
+    # --- Filter Node Features (Spatio-Temporal Aware) ---
+    # We must filter on dimension 1 (the Node dimension)
+    # (T, N_total, F) -> (T, N_sub, F)
+    validation_graph.x = validation_graph.x[:, keep_nodes_mask, :]
+    validation_graph.y = validation_graph.y[:, keep_nodes_mask, :]
+
+    # --- Filter other node-level attributes ---
+    # We also filter the masks themselves so they align with the new graph
+    validation_graph.train_mask = full_graph.train_mask[keep_nodes_mask]
+    validation_graph.val_mask = full_graph.val_mask[keep_nodes_mask]
+    validation_graph.test_mask = full_graph.test_mask[
+        keep_nodes_mask
+    ]  # (will be all False)
+
+    # --- Save mapping from new index (0..N_sub-1) to old index (0..N_total-1) ---
+    # This is critical for mapping predictions back to the full graph
+    validation_graph.orig_id = torch.arange(num_total_nodes)[keep_nodes_mask]
+
+    # --- Filter Edges (The PyG Way) ---
+    # Use the 'subgraph' utility to:
+    # 1. Select only edges where both nodes are in `keep_nodes_mask`
+    # 2. Relabel node indices in edge_index from (0..N_total-1) to (0..N_sub-1)
+
+    new_edge_index, new_edge_attr, edge_mask = subgraph(
+        subset=keep_nodes_mask,
+        edge_index=validation_graph.edge_index,
+        relabel_nodes=True,
+        num_nodes=num_total_nodes,
+        return_edge_mask=True,
+    )
+
+    validation_graph.edge_index = new_edge_index
+
+    # Also filter edge attributes if they exist
+    if (
+        hasattr(validation_graph, "edge_attr")
+        and validation_graph.edge_attr is not None
+    ):
+        validation_graph.edge_attr = validation_graph.edge_attr[:, edge_mask]
+
+    # print("after processing, train edge_index:", train_graph.edge_index.shape)
+    # print("after processing, train edge_attr:", train_graph.edge_attr.shape)
+    # print("after processing, full edge_index:", full_graph.edge_index.shape)
+    # print("after processing, full edge_attr:", full_graph.edge_attr.shape)
+
+    return train_graph, validation_graph, full_graph
+
+
+def build_train_and_full_graph(
+    data, split_info, general_station_ids, rainfall_station_ids
+):
+    """
+    Builds:
+      1. full_graph (all nodes, with masks only)
+      2. train_graph (train + val nodes only, test nodes removed)
+    """
+
+    # Clone original graph
+    full_graph = data.clone()
+
+    # Masks --------------------------
+    full_graph["general_station"].train_mask = torch.tensor(
+        [1 if sid in split_info["ml"]["train"] else 0 for sid in general_station_ids]
+    )
+    full_graph["general_station"].val_mask = torch.tensor(
+        [
+            1 if sid in split_info["ml"]["validation"] else 0
+            for sid in general_station_ids
+        ]
+    )
+    full_graph["general_station"].test_mask = 1 - (
+        full_graph["general_station"].train_mask
+        | full_graph["general_station"].val_mask
+    )
+
+    full_graph["rainfall_station"].train_mask = torch.tensor(
+        [1 if sid in split_info["ml"]["train"] else 0 for sid in rainfall_station_ids]
+    )
+    full_graph["rainfall_station"].val_mask = torch.tensor(
+        [
+            1 if sid in split_info["ml"]["validation"] else 0
+            for sid in rainfall_station_ids
+        ]
+    )
+    full_graph["rainfall_station"].test_mask = 1 - (
+        full_graph["rainfall_station"].train_mask
+        | full_graph["rainfall_station"].val_mask
+    )
+
+    # --------------------------------------------
+    # Build train_graph by KEEPING train+val nodes
+    # --------------------------------------------
+    train_graph = data.clone()
+
+    keep_gen = (
+        full_graph["general_station"].train_mask
+        | full_graph["general_station"].val_mask
+    ).bool()
+    keep_rain = (
+        full_graph["rainfall_station"].train_mask
+        | full_graph["rainfall_station"].val_mask
+    ).bool()
+
+    # Filter node features
+    train_graph["general_station"].x = train_graph["general_station"].x[keep_gen]
+    train_graph["general_station"].y = train_graph["general_station"].y[keep_gen]
+
+    train_graph["rainfall_station"].x = train_graph["rainfall_station"].x[keep_rain]
+    train_graph["rainfall_station"].y = train_graph["rainfall_station"].y[keep_rain]
+
+    # Save mapping (very important)
+    train_graph["general_station"].orig_id = torch.arange(len(keep_gen))[keep_gen]
+    train_graph["rainfall_station"].orig_id = torch.arange(len(keep_rain))[keep_rain]
+
+    # Filter edges based on retained nodes
+    new_edge_index_dict = {}
+    for (src, rel, dst), edge_index in train_graph.edge_index_dict.items():
+        if src == "general_station":
+            src_mask = keep_gen
+        elif src == "rainfall_station":
+            src_mask = keep_rain
+        else:
+            src_mask = torch.ones(train_graph[src].num_nodes, dtype=bool)
+
+        if dst == "general_station":
+            dst_mask = keep_gen
+        elif dst == "rainfall_station":
+            dst_mask = keep_rain
+        else:
+            dst_mask = torch.ones(train_graph[dst].num_nodes, dtype=bool)
+
+        # Keep edges where both endpoints survive
+        keep_edges = src_mask[edge_index[0]] & dst_mask[edge_index[1]]
+        new_edge_index = edge_index[:, keep_edges]
+
+        new_edge_index_dict[(src, rel, dst)] = new_edge_index
+
+    train_graph.edge_index_dict = new_edge_index_dict
+
+    return train_graph, full_graph

@@ -271,3 +271,89 @@ class GNNInductive(torch.nn.Module):
         out = self.lin_general(x)
         
         return out
+
+class GNNInductiveHetero(torch.nn.Module):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers):
+        """
+        Args:
+            in_channels_dict: dict 
+                {
+                    'general_station': F_g,
+                    'rainfall_station': F_r
+                }
+        """
+        super().__init__()
+
+        self.config = dict(
+            in_channels=in_channels_dict,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+        )
+
+        self.convs = torch.nn.ModuleList()
+
+        for layer_idx in range(num_layers):
+            conv = HeteroConv({
+                ('general_station', 'gen_to_gen', 'general_station'):
+                    GraphConv((-1, -1), hidden_channels),
+
+                ('general_station', 'gen_to_rain', 'rainfall_station'):
+                    GraphConv((-1, -1), hidden_channels),
+
+                ('rainfall_station', 'rain_to_gen', 'general_station'):
+                    GraphConv((-1, -1), hidden_channels),
+
+                ('rainfall_station', 'rain_to_rain', 'rainfall_station'):
+                    GraphConv((-1, -1), hidden_channels),
+            }, aggr='sum')
+
+            self.convs.append(conv)
+
+        self.lin_general = Linear(hidden_channels, out_channels)
+        self.lin_rainfall = Linear(hidden_channels, out_channels)
+
+        # # Optional: normalization
+        # self.norm_general = torch.nn.LayerNorm(hidden_channels)
+        # self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
+
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict=None):
+        """
+        Args:
+            x_dict:
+                {
+                    'general_station': [N_gen, F_g],
+                    'rainfall_station': [N_rain, F_r],
+                }
+            edge_index_dict:
+                {
+                    ('general_station','gen_to_gen','general_station'): edge_index,
+                    ('general_station','gen_to_rain','rainfall_station'): edge_index,
+                    ...
+                }
+            edge_attr_dict: (optional) same key structure as edge_index_dict
+        """
+
+        h_dict = x_dict
+
+        for conv in self.convs:
+            h_dict = conv(
+                h_dict,
+                edge_index_dict,
+                edge_attr_dict if edge_attr_dict is not None else None
+            )
+
+            # Apply activation after each layer
+            h_dict = {k: F.relu(v) for k, v in h_dict.items()}
+
+        # # Optionally normalize
+        # h_dict['general_station'] = self.norm_general(h_dict['general_station'])
+        # h_dict['rainfall_station'] = self.norm_rainfall(h_dict['rainfall_station'])
+
+        # Output prediction heads
+        out_dict = {
+            'general_station': self.lin_general(h_dict['general_station']),
+            'rainfall_station': self.lin_rainfall(h_dict['rainfall_station']),
+        }
+
+        return out_dict
