@@ -4,7 +4,6 @@ from dataset.weather_graph_dataset import (
     WeatherGraphDatasetNew,
     HomogeneousWeatherGraphDatasetNew,
 )
-from src.miscellaneous import get_straight_distance
 import xarray as xr
 import rasterio
 import yaml

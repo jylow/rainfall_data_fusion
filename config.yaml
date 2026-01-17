@@ -7,3 +7,7 @@ dataset_parameters:
 
 visualisation:
   bounds: [0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20]
+
+country_info:
+  name: 'Singapore'
+  country_bounds: {"left": 103.6, "right": 104.1, "top": 1.5, "bottom": 1.188}
