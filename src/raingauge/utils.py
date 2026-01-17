@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 def load_raingauge_dataset(
-    dataset_name: str, dataset_folder="database", N=0
+    filepath: str
 ) -> pd.DataFrame:
     """
     Loads raingauge dataset into a pandas DataFrame object
@@ -13,8 +13,7 @@ def load_raingauge_dataset(
         file containing dictionary with dataset creation information
     """
 
-    path = f"{dataset_folder}/{dataset_name}"
-    gauge_df = pd.read_csv(path)
+    gauge_df = pd.read_csv(filepath)
 
     # format time
     gauge_df["time_sgt"] = gauge_df["time_sgt"].apply(
@@ -27,12 +26,11 @@ def load_raingauge_dataset(
     )
 
     data_cols = [col for col in formatted_gauge_df.columns if col != "time_sg"]
-    filtered_res = formatted_gauge_df[
-        (formatted_gauge_df[data_cols] > 0).sum(axis=1) >= N
-    ]
 
-    return filtered_res
+    return gauge_df
 
+'''
+DEPRECIATED
 
 def load_weather_station_dataset(
     dataset_name: str, dataset_folder="database"
@@ -119,3 +117,4 @@ def get_weather_stations(filename="database/weather_stations.csv") -> pd.DataFra
     station_location_df = pd.read_csv(filename)
 
     return station_location_df
+'''

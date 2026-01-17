@@ -8,11 +8,16 @@ from src.radar.utils import load_radar_dataset
 def get_dataset(
         raingauge_path: str,
         radar_path: str,
+        cml_path: str,
         database_folder = "database",
     ) -> pd.DataFrame:
 
     '''
     Returns processed dataset
+    Processed dataset contains a dataframe of all the aggregated data of the following types
+    Rain gauge
+    Rain radar
+    CML (In progress)
     '''
     # df to be used to combine all the data
     combined_df = pd.DataFrame()
@@ -25,14 +30,16 @@ def get_dataset(
     )
     print(f"Loaded raingauge dataset from {raingauge_filepath}")
     print(f"Dataset size: {raingauge_df.shape}")
+    return raingauge_df
 
+    '''
     #Get radar dataframe
     radar_filepath = f"{database_folder}/{radar_path}"
     radar_df = load_radar_dataset(folder_name=radar_path, cropped=True)
 
     combined_df = raingauge_df.merge(radar_df, how='inner', on='time_sgt')
     #Get cml dataframe
-
+    '''
 
     return combined_df
 
@@ -40,13 +47,15 @@ def get_dataset(
 def main(config):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(config)
-    '''
+    
     df = get_dataset(
-        raingauge_path ='raingauge_nea_data/2025/weather_station_data_2025.csv',
-        radar_path = 'sg_radar_data_cropped',
+        raingauge_data_path = config['dataset_parameters']['raingauge_file'],
+        raingauge_station_info_path = config['dataset_parameters']['raingauge_station_file'],
+        radar_path = config['dataset_parameters']['radar_folder'],
+        cml_path = config['dataset_parameters']['cml_file'],
     )
+
     print(df.shape)
-    '''
 
 
 if __name__ == '__main__':
