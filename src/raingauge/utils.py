@@ -9,25 +9,24 @@ def load_raingauge_dataset(
     Loads raingauge dataset into a pandas DataFrame object
     ------
     dataset_name: .csv file
-    N: filter for timestamp that contains >= N non-zero datapoints
-        file containing dictionary with dataset creation information
     """
-
+    print("Loading raingauge_dataset from {filepath}")
     gauge_df = pd.read_csv(filepath)
 
+    print(gauge_df.iloc[0])
+
     # format time
-    gauge_df["time_sgt"] = gauge_df["time_sgt"].apply(
+    gauge_df["timestamp"] = gauge_df["timestamp"].apply(
         lambda x: datetime.strptime(x, "%Y-%m-%dT%H:%M:00+08:00")
     )
 
     # convert to table with stations as columns
     formatted_gauge_df = gauge_df.pivot(
-        index="time_sgt", columns="gid", values="rain_rate"
+        index="timestamp", columns="stationId", values="value"
     )
-
-    data_cols = [col for col in formatted_gauge_df.columns if col != "time_sg"]
-
-    return gauge_df
+    print("Loading complete")
+    print(f"Dataframe shape: {formatted_gauge_df.shape}")
+    return formatted_gauge_df
 
 '''
 DEPRECIATED

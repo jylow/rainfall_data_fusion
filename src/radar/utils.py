@@ -13,16 +13,18 @@ class RadarDataObject:
         self.transform = transform
 
 
-def load_radar_dataset(folder_name: str, dataset_folder="database", cropped=False) -> pd.DataFrame:
+def load_radar_dataset(folder_name: str, cropped=False) -> pd.DataFrame:
     """
     Loads radar dataset into a pandas DataFrame object
     ------
     folder_name: folder that contains data separated into different folders(date of data) and .tif files containing
                  weather radar information
+    cropped: boolean. Set to true if preprocessing of tif files was done to crop the images
     """
 
     df = pd.DataFrame()
-    tif_folder_path = f"{dataset_folder}/{folder_name}"
+    tif_folder_path = folder_name
+    print(f"Loading radar TIF files from {tif_folder_path}")
 
     count = 0
 
@@ -40,7 +42,7 @@ def load_radar_dataset(folder_name: str, dataset_folder="database", cropped=Fals
                     d = RadarDataObject(data, bounds, crs, transform)
                     new_row = pd.DataFrame(
                         {
-                            "time_sgt": [timestamp],
+                            "timestamp": [timestamp],
                             "data": [data],
                             "bounds": [bounds],
                             "crs": [crs],
@@ -49,5 +51,6 @@ def load_radar_dataset(folder_name: str, dataset_folder="database", cropped=Fals
                     )
                     df = pd.concat([df, new_row], ignore_index=True)
 
-    print(f"The size of dataset is {count}")
+    print("Radar dataset loaded!")
+    print(f"The size of dataset is {df.shape}")
     return df

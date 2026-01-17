@@ -6,7 +6,7 @@ from src.raingauge.utils import load_raingauge_dataset
 from src.radar.utils import load_radar_dataset
 
 def get_dataset(
-        raingauge_path: str,
+        raingauge_data_path: str,
         radar_path: str,
         cml_path: str,
         database_folder = "database",
@@ -19,27 +19,29 @@ def get_dataset(
     Rain radar
     CML (In progress)
     '''
-    # df to be used to combine all the data
+    # Declare Dataframes to be used to combine all the data
     combined_df = pd.DataFrame()
+    raingauge_df: pd.DataFrame
+    radar_df: pd.DataFrame
+    cml_df: pd.DataFrame
 
+    '''
     #Get raingauge dataframe
-    raingauge_filepath = f"{database_folder}/{raingauge_path}"
+    raingauge_filepath = f"{database_folder}/{raingauge_data_path}"
     print(f"Loading raingauge dataset from {raingauge_filepath}")
     raingauge_df = load_raingauge_dataset(
             filepath=raingauge_filepath
     )
-    print(f"Loaded raingauge dataset from {raingauge_filepath}")
-    print(f"Dataset size: {raingauge_df.shape}")
     return raingauge_df
-
     '''
+
     #Get radar dataframe
     radar_filepath = f"{database_folder}/{radar_path}"
-    radar_df = load_radar_dataset(folder_name=radar_path, cropped=True)
+    radar_df = load_radar_dataset(folder_name=radar_filepath, cropped=True)
+    print(radar_df.iloc[0])
+    #combined_df = raingauge_df.merge(radar_df, how='inner', on='time_sgt')
 
-    combined_df = raingauge_df.merge(radar_df, how='inner', on='time_sgt')
     #Get cml dataframe
-    '''
 
     return combined_df
 
@@ -50,7 +52,6 @@ def main(config):
     
     df = get_dataset(
         raingauge_data_path = config['dataset_parameters']['raingauge_file'],
-        raingauge_station_info_path = config['dataset_parameters']['raingauge_station_file'],
         radar_path = config['dataset_parameters']['radar_folder'],
         cml_path = config['dataset_parameters']['cml_file'],
     )
