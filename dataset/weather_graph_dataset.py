@@ -178,7 +178,7 @@ class HomogeneousWeatherGraphDatasetInductive(Dataset):
         if mode == "train":
             self.mask = graph.train_mask
         elif mode == "val":
-            self.mask = graph.val_mask
+            self.mask = graph.validation_mask
         else:
             self.mask = graph.test_mask
 
@@ -193,6 +193,7 @@ class HomogeneousWeatherGraphDatasetInductive(Dataset):
         y = self.graph.y[idx]
         
         # Create a PyG Data object
+        
         data = Data(
             x=x,
             y=y,
@@ -200,7 +201,8 @@ class HomogeneousWeatherGraphDatasetInductive(Dataset):
             edge_attr=self.graph.edge_attr if hasattr(self.graph, 'edge_attr') else None,
             mask=self.mask,  # Nodes to train on
             train_mask=self.graph.train_mask,  # For masking features
-            station_id = self.graph.orig_id,
+            station_id = self.graph.station_id,
+            num_nodes=x.shape[0]
         )
         
         return data

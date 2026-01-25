@@ -10,6 +10,7 @@ def get_dataset(
         radar_path: str,
         cml_path: str,
         database_folder = "database",
+        raingauge_filter: int = None,
     ) -> pd.DataFrame:
 
     '''
@@ -25,16 +26,21 @@ def get_dataset(
     radar_df: pd.DataFrame
     cml_df: pd.DataFrame
 
-    '''
+    #----------------------- 
     #Get raingauge dataframe
     raingauge_filepath = f"{database_folder}/{raingauge_data_path}"
     print(f"Loading raingauge dataset from {raingauge_filepath}")
     raingauge_df = load_raingauge_dataset(
             filepath=raingauge_filepath
     )
-    return raingauge_df
-    '''
+    
 
+    #We fill filter the raingauge data based on the raingauge_filter treshhold
+    if raingauge_filter:
+      count_df = raingauge_df.isna().count()
+    
+        
+    #----------------------- 
     #Get radar dataframe
     radar_filepath = f"{database_folder}/{radar_path}"
     radar_df = load_radar_dataset(folder_name=radar_filepath, cropped=True)

@@ -10,7 +10,7 @@ def load_raingauge_dataset(
     ------
     dataset_name: .csv file
     """
-    print("Loading raingauge_dataset from {filepath}")
+    print(f"Loading raingauge_dataset from {filepath}")
     gauge_df = pd.read_csv(filepath)
 
     print(gauge_df.iloc[0])
@@ -20,6 +20,9 @@ def load_raingauge_dataset(
         lambda x: datetime.strptime(x, "%Y-%m-%dT%H:%M:00+08:00")
     )
 
+    # convert to rainrate
+    gauge_df['value'] = gauge_df['value'] * 12
+
     # convert to table with stations as columns
     formatted_gauge_df = gauge_df.pivot(
         index="timestamp", columns="stationId", values="value"
@@ -27,6 +30,22 @@ def load_raingauge_dataset(
     print("Loading complete")
     print(f"Dataframe shape: {formatted_gauge_df.shape}")
     return formatted_gauge_df
+
+
+
+def get_station_coordinate_mappings(filename="database/weather_stations.csv") -> dict:
+    """
+    Returns dictionary containing the mappings of station names to coordinates for raingauge
+
+    dict: [key, (lat,lon)]
+    ------
+    """
+
+    gauge_df = pd.read_csv(filename)
+    station_dict = dict(zip(gauge_df['deviceId'], zip(gauge_df['latitude'], gauge_df['longitude'])))
+    
+
+    return station_dict
 
 '''
 DEPRECIATED
@@ -88,28 +107,6 @@ def get_gauge_stations(filename="database/weather_stations.csv") -> pd.DataFrame
     return station_locations_df
 
 
-def get_station_coordinate_mappings(filename="database/weather_stations.csv") -> dict:
-    """
-    Returns dictionary containing the mappings of station names to coordinates for raingauge
-
-    dict: [key, (lat,lon)]
-    ------
-    """
-
-    gauge_df = pd.read_csv(filename)
-    station_locations_df = get_gauge_stations(filename)
-    station_locations = station_locations_df["gid"].to_numpy()
-    station_name_to_coordinates = station_locations_df[
-        ["gid", "latitude", "longitude"]
-    ].to_numpy()
-    station_dict = dict()
-
-    for name, lat, lon in station_name_to_coordinates:
-        station_dict[name] = (lat, lon)
-
-    gauge_df = gauge_df[gauge_df["gid"].isin(station_locations)]
-
-    return station_dict
 
 
 def get_weather_stations(filename="database/weather_stations.csv") -> pd.DataFrame:
