@@ -693,13 +693,16 @@ def prepare_homogeneous_inductive_dataset(
         print("PREPARING TRAIN/VAL DATALOADERS (using train_graph)")
         print(f"{'=' * 60}")
 
-        train_graph = filter_edges_for_inductive(train_graph)
+        #train_graph = filter_edges_for_inductive(train_graph)
         train_dataset = HomogeneousWeatherGraphDatasetInductive(
             train_graph, mode="train"
         )
         val_dataset = HomogeneousWeatherGraphDatasetInductive(
             validation_graph, mode="val"
         )
+
+        #Duplicate train graph N (no. of nodes) times to generate mask one graphs
+        
 
         # Inspect one sample
         sample = train_dataset[0]

@@ -264,7 +264,7 @@ class GNNInductive(torch.nn.Module):
         IMPORTANT: GraphConv only takes (x, edge_index, edge_weight)
         """
         for i, conv in enumerate(self.convs):
-            x = conv(x, edge_index)
+            x = conv(x, edge_index, edge_attributes)
             
             x = F.relu(x)
         
