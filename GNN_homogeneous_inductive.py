@@ -45,7 +45,7 @@ with open(config_file) as f:
 
 
 # # Preprocess station data.
-# 
+#
 # 1. Load weather station information
 # 2. Load weather station mappings
 # 3. Filter weather stations by uptime
@@ -78,8 +78,8 @@ weather_station_df = weather_station_df[keep_mask]
 weather_station_mappings = {}
 
 # 2. Load weather station mappings
-for i in range(3):
-  year = 2023 + i
+for i in range(5):
+  year = 2021+ i
   year_stations = get_station_coordinate_mappings(f"database/raingauge_nea_data/{year}/weather_stations_{year}.csv")
   print(year_stations)
   weather_station_mappings |= year_stations
@@ -126,9 +126,6 @@ for station in rainfall_stations:
     rainfall_station_features.append(station_feat)
     rainfall_station_order.append(station)
 
-print("SHAPE OF RAINGAUGE DATA")
-print(np.array(rainfall_station_features).shape)
-
 
 # # Stratified K Fold Spatial Sampling
 
@@ -144,16 +141,16 @@ print(split_info)
 # ## Add Station Features to HeteroData Class
 # Note: Currently we are only using rainfall values so there is no need for general stations
 
-# In[6]:
-
 
 print(list(weather_station_mappings))
 
 
-# In[7]:
-
-
-rainfall_station_data_tensor = torch.tensor(rainfall_station_features)
+print(f"DEBUG: {rainfall_station_features}")
+print(f"DEBUG: {type(rainfall_station_features)}")
+rainfall_station_data_tensor = torch.tensor(
+    np.stack([s.values for s in rainfall_station_features]),
+    dtype=torch.float32
+)
 gauge_graph_arr = []
 for i in range(fold_count):
   data = add_homogeneous_weather_station_data(
@@ -178,6 +175,8 @@ for i in range(fold_count):
   ))
 
 
+print("INITIALISING THE GRAPH")
+
 # ##
 
 # ## Graph Generation
@@ -185,10 +184,10 @@ for i in range(fold_count):
 # 1. Training graph: Train Nodes
 # 2. Validation graph: Train + Val nodes
 # 3. Testing graph: Train + Val + Test Nodes
-# 
-# The graphs will be generated independently. 
+#
+# The graphs will be generated independently.
 # Each graph will be connected with the K nearest neighbours where K = 4 such that the graph will be fully connected.
-# 
+#
 # Note: Future graph creations with methods like epsilon ball radius and fully connected graphs can also be explored
 
 # # Creating the GNN
@@ -196,10 +195,10 @@ for i in range(fold_count):
 # In[8]:
 
 
-hidden_channels = 4
+hidden_channels = 8
 in_channels = 1
 out_channels = 1
-num_layers = 8
+num_layers = 5
 model_arr = []
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -382,7 +381,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 perf.log_model_config(model_arr[0].config)
 
-batch_size = 16
+batch_size = 256
 train_loader_arr = []
 val_loader_arr = []
 for i in range(fold_count):
@@ -396,6 +395,8 @@ for i in range(fold_count):
 
 def train(model, train_loader, val_loader, fold, device="cpu"):
     # CHECK 1: Print initial weights
+    print("Training")
+    print(f"Device type: {device}")
     first_param = next(model.parameters())
     print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
 
@@ -406,10 +407,11 @@ def train(model, train_loader, val_loader, fold, device="cpu"):
     mini = 1000
     stopping_condition = 5
     epochs = 0
-    total_epochs = 10
+    total_epochs = 30
     print(f"-----FOLD: {fold}-----")
     training_start = time.time()
     for i in range(total_epochs):
+        epoch_start = time.time()
         print(f"-----EPOCH: {i + 1}-----")
 
         # CHECK 2: Print weight before training
@@ -454,7 +456,8 @@ def train(model, train_loader, val_loader, fold, device="cpu"):
                 total_norm += p.grad.data.norm(2).item() ** 2
         total_norm = total_norm**0.5
         print(f"Gradient norm: {total_norm:.6f}")
-
+        epoch_end = time.time()
+        print(f"epoch {i} took {epoch_end - epoch_start}")
     training_end = time.time()
     total_time = training_end - training_start
     perf.finalise(total_time)
@@ -602,7 +605,7 @@ def test_model(model, dataloader, device, fold=0, verbose=False):
     plt.ylabel("Predicted")
     plt.title("Test Set Performance")
     plt.grid(True)
-    text = f"Pearson r = {pearson_r:.3f}\nRMSE = {rmse:.3f}" 
+    text = f"Pearson r = {pearson_r:.3f}\nRMSE = {rmse:.3f}"
     plt.text( 0.05, 0.95, text, transform=plt.gca().transAxes, verticalalignment="top", bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"), )
     plt.savefig(f"experiments/{experiment_name}/test_scatter_plot_{fold}.png", dpi=300)
     plt.close()

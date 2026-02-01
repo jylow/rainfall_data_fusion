@@ -1,7 +1,7 @@
 # dataset creation parameters
 dataset_parameters:
   database_folder: 'database'
-  raingauge_file: 'raingauge_data_2023_2025.csv'
+  raingauge_file: 'raingauge_data_2021_2025.csv'
   raingauge_station_file: 'raingauge_data_2023_2025.csv'
   radar_folder: 'sg_radar_data_cropped'
   cml_file: ''
