@@ -31,9 +31,21 @@ def load_raingauge_dataset(
     print(f"Dataframe shape: {formatted_gauge_df.shape}")
     return formatted_gauge_df
 
+def filter_uptime(raingauge_df: pd.DataFrame, uptime_threshold = 0.9) -> pd.DataFrame:
+    '''
+    Filters dataframe for threshold where we keep only stations with >threshold uptime
+    
+    :param df: Description
+    :return: Description
+    :rtype: DataFrame
+    '''
+    raingauge_uptime = raingauge_df.notna().sum() / len(raingauge_df)
+    filtered_stations_df = raingauge_uptime[raingauge_uptime >= uptime_threshold]
+    return filtered_stations_df
 
 
-def get_station_coordinate_mappings(filename="database/weather_stations.csv") -> dict:
+
+def get_station_coordinate_mappings(filename="database/weather_stations.csv", start: int = 0, end: int = 0) -> dict:
     """
     Returns dictionary containing the mappings of station names to coordinates for raingauge
 
@@ -41,11 +53,24 @@ def get_station_coordinate_mappings(filename="database/weather_stations.csv") ->
     ------
     """
 
-    gauge_df = pd.read_csv(filename)
-    station_dict = dict(zip(gauge_df['deviceId'], zip(gauge_df['latitude'], gauge_df['longitude'])))
-    
+    station_df = pd.DataFrame()
 
+    for year in range(start, end + 1):
+        df = pd.read_csv(f"database/raingauge_nea_data/{year}/weather_stations_{year}.csv")
+        station_df = pd.concat([station_df, df]).drop_duplicates(['id', 'latitude', 'longitude']).reset_index(drop=True)
+    station_dict = dict(zip(station_df['id'], zip(station_df['latitude'], station_df['longitude'])))
     return station_dict
+
+def get_station_mapping_df(start: int, end: int) -> pd.DataFrame:
+    station_df = pd.DataFrame()
+
+    for year in range(start, end + 1):
+        df = pd.read_csv(f"database/raingauge_nea_data/{year}/weather_stations_{year}.csv")
+        station_df = pd.concat([station_df, df]).drop_duplicates(['id', 'latitude', 'longitude']).reset_index(drop=True)
+
+    station_df['order'] = [i for i in range(station_df.shape[0])]
+    return station_df
+
 
 '''
 DEPRECIATED

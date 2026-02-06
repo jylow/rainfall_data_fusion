@@ -51,7 +51,7 @@ with open(config_file) as f:
 # 3. Filter weather stations by uptime
 
 # 1. Load weather station information
-uptime_treshold = 0.9
+uptime_treshold = config['filter']['uptime_treshold']
 weather_station_df = load_raingauge_dataset(f'database/{config['dataset_parameters']['raingauge_file']}')
 
 
