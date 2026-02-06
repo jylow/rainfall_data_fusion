@@ -381,7 +381,7 @@ torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 perf.log_model_config(model_arr[0].config)
 
-batch_size = 256
+batch_size = 512
 train_loader_arr = []
 val_loader_arr = []
 for i in range(fold_count):
