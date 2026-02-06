@@ -8,18 +8,164 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import pearsonr, spearmanr
 
-from src.utils import load_raingauge_dataset, get_gauge_coordinate_mappings
-from src.visualisation import *
 
 
-def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_stations: list, test_stations: list, power=1, loss_hist=False, x_grid=None, y_grid=None, plot_time_start=None, ax=None, axis_rows=0, axis_cols=0, n_nearest=None, regression_plot=False):
+def run_IDW_benchmark(raingauge_data: pd.DataFrame, 
+                            coordinates: dict, 
+                            training_stations: list, 
+                            test_stations: list, 
+                            power=2, 
+                            n_nearest=15,
+                            regression_plot=False):
+    '''
+    Runs IDW benchmark with exact point interpolation.
+    For each test station, interpolates using n_nearest training stations.
+    
+    Parameters:
+    -----------
+    raingauge_data : pd.DataFrame
+        DataFrame with timestamps as index and station IDs as columns
+    coordinates : dict
+        Dictionary mapping station IDs to (lat, lon) tuples
+    training_stations : list
+        List of station IDs to use for training
+    test_stations : list
+        List of station IDs to evaluate
+    power : float, optional (default=2)
+        Power parameter for IDW
+    n_nearest : int, optional (default=15)
+        Number of nearest training stations to use for each interpolation
+    regression_plot : bool, optional (default=False)
+        Whether to show regression plot
+        
+    Returns:
+    --------
+    average_RMSE_loss : float
+        Root mean squared error across all timestamps and test stations
+    '''
+    
+    start_time = time.time()
+    
+    actual_values_list = []
+    predicted_values_list = []
+    
+    print(f"Training stations: {training_stations}")
+    print(f"Test stations: {test_stations}")
+    print(f"Using {n_nearest} nearest neighbors for interpolation")
+    
+    # Iterate over each timestamp
+    for timestamp, row in tqdm.tqdm(raingauge_data.iterrows(), total=len(raingauge_data)):
+        timestep_actual_values_list = []
+        timestep_predicted_values_list = []
+        #Handle missing values
+        row = row.dropna()
+        #row = row.fillna(0) 
+        
+        # Get training data for this timestamp
+        training_coords = []
+        training_values = []
+        
+        for station in training_stations:
+            if station in row.index:
+                lat, lon = coordinates[station]
+                training_coords.append((lat, lon))
+                training_values.append(row[station])
+        # Skip if insufficient training data
+        if len(training_coords) < n_nearest:
+            continue
+        
+        training_coords = np.array(training_coords)
+        training_values = np.array(training_values)
+        
+        # Interpolate for each test station
+        for station in test_stations:
+            if station not in row.index:
+                continue
+                
+            test_lat, test_lon = coordinates[station]
+            actual_value = row[station]
+            
+            # Calculate distances from test station to all training stations
+            distances = np.sqrt(
+                (training_coords[:, 0] - test_lat)**2 + 
+                (training_coords[:, 1] - test_lon)**2
+            )
+            
+            # Get indices of n_nearest closest stations
+            nearest_indices = np.argpartition(distances, min(n_nearest, len(distances)-1))[:n_nearest]
+            nearest_distances = distances[nearest_indices]
+            nearest_values = training_values[nearest_indices]
+            
+            # Perform IDW interpolation
+            if np.any(nearest_distances == 0):
+                # Test station coincides with a training station
+                predicted_value = nearest_values[np.argmin(nearest_distances)]
+            else:
+                weights = 1.0 / (nearest_distances ** power)
+                weights = weights / np.sum(weights)
+                predicted_value = np.sum(weights * nearest_values)
+            
+            timestep_actual_values_list.append(actual_value)
+            timestep_predicted_values_list.append(predicted_value)
+        actual_values_list.append(np.array(timestep_actual_values_list))
+        predicted_values_list.append(np.array(timestep_predicted_values_list))
 
-  '''
-  Runs IDW benchmark. A grid will be generated based on the given x and y coordinate values and will be compared with the training
-  data.
-  ------
-  returns: 2D array containing the grid that was interpolated for use in interpolation if necessary
-  '''   
+    timestep_MSE_arr = []
+    for i in range(len(actual_values_list)):
+        timestep_MSE = np.nanmean((actual_values_list[i] - predicted_values_list[i]) ** 2)
+        timestep_MSE_arr.append(timestep_MSE)
+    timestep_RMSE_arr = np.sqrt(np.array(timestep_MSE_arr))
+    average_timestep_RMSE = np.mean(timestep_RMSE_arr)
+
+    actual_values_arr = np.concat(actual_values_list) #This is a 2d array of no. timestamps * 
+    predicted_values_arr = np.concat(predicted_values_list)
+    
+    # Remove any NaN values
+    mask = ~(np.isnan(actual_values_arr) | np.isnan(predicted_values_arr))
+    actual_values_arr = actual_values_arr[mask]
+    predicted_values_arr = predicted_values_arr[mask]
+
+    
+    
+    # Calculate MSE and RMSE
+    squared_errors = (actual_values_arr - predicted_values_arr) ** 2
+    average_MSE_loss = np.mean(squared_errors)
+    average_RMSE_loss = np.sqrt(average_MSE_loss)
+    
+    end_time = time.time()
+    time_taken = end_time - start_time
+    
+    print(f"Average RMSE loss: {average_RMSE_loss:.4f} mm/hr")
+    print(f"Average RMSE per timestep: {average_timestep_RMSE:.4f} mm/hr")
+    print(f"Average MSE loss: {average_MSE_loss:.4f} mm²/hr²")
+    print(f"Time taken: {time_taken:.2f} seconds")
+    print(f"Number of predictions: {len(actual_values_arr)}")
+    
+    # Regression plot
+    if regression_plot:
+        plt.figure(figsize=(10, 10))
+        plt.scatter(actual_values_arr, predicted_values_arr, alpha=0.5)
+        
+        plot_bound = max(np.nanmax(actual_values_arr), np.nanmax(predicted_values_arr))
+        plt.plot([0, plot_bound], [0, plot_bound], 'r--', label='Perfect prediction')
+        
+        plt.xlabel('Actual values (mm/hr)')
+        plt.ylabel('Predicted values (mm/hr)')
+        plt.title(f'IDW Point Interpolation (n_nearest={n_nearest})')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+        
+        # Calculate Pearson correlation
+        pearson_r, pearson_p = pearsonr(actual_values_arr, predicted_values_arr)
+        print(f"Pearson correlation: {pearson_r:.4f} (p-value: {pearson_p:.4e})")
+    
+    return average_RMSE_loss
+
+'''
+def run_IDW_benchmark(raingauge_df: pd.DataFrame, coordinates: dict, training_stations: list, test_stations: list, power=1, loss_hist=False, x_grid=None, y_grid=None, plot_time_start=None, ax=None, axis_rows=0, axis_cols=0, n_nearest=None, regression_plot=False):
+
+
 
   start_time = time.time()
 
@@ -33,16 +179,13 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
 
   #loss histogram display
   loss_data = []
-  actual_values_arr = np.zeros(shape=[raingauge_data.shape[0], len(test_stations)])
-  predicted_values_arr = np.zeros(shape=[raingauge_data.shape[0], len(test_stations)])
+  actual_values_arr = np.zeros(shape=[raingauge_df.shape[0], len(test_stations)])
+  predicted_values_arr = np.zeros(shape=[raingauge_df.shape[0], len(test_stations)])
 
   print(f"training_stations {training_stations}")
   print(f'validation_stations {test_stations}')
 
-  for idx, row in tqdm.tqdm(enumerate(raingauge_data.iterrows())):
-    timestamp = row[0]
-    #row = row[1].fillna(0) ##hacky
-    row = row[1].dropna()
+  for idx, row in tqdm.tqdm(raingauge_df.iterrows()):
     known_x = []
     known_y = []
     known_values = []
@@ -62,25 +205,6 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
                                          gauge_z=known_values,
                                          power=power,
                                          n_nearest=n_nearest)
-    
-    #plotting function to visualise the data. In the function, we are assuming that the timestamps are contiguous
-    if plot_time_start != None and timestamp >= plot_time_start and axcount < axtotal:
-       axi = ax[axcount//axis_rows][axcount%axis_cols]
-       cmap=plt.get_cmap('turbo').copy()
-       cmap.set_under('w')
-       pc = axi.pcolormesh(
-          x_grid, 
-          y_grid,
-          predicted_values,
-          shading='nearest',
-          cmap=cmap,
-          norm=mpl.colors.BoundaryNorm(boundaries=[0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20], ncolors=256, extend='both'),
-          alpha=0.5,
-       )
-       axi.set_title(str(timestamp))
-       visualise_singapore_outline(ax=axi)
-       visualise_with_basemap(axi)
-       axcount += 1
     
     row_predicted_arr = []
     row_actual_arr = []
@@ -144,6 +268,11 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame, coordinates: dict, training_
     print(f"Pearson correlation: {pearson_r_global}")
 
   return average_MSE_loss
+
+def idw_interpolation():
+   pass
+
+
 
 def idw_interpolation_gridded(x_grid, y_grid, gauge_x, gauge_y, gauge_z, power=2, smoothing=0, n_nearest=None):
     """
@@ -221,3 +350,4 @@ def idw_interpolation_gridded(x_grid, y_grid, gauge_x, gauge_y, gauge_z, power=2
                 z_interpolated[i, j] = np.sum(weights * local_gauge_z)
 
     return z_interpolated
+'''
