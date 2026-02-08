@@ -22,10 +22,12 @@ class RadarGraph():
         self.bounds = df.iloc[0]['bounds']
         self.x_coords = np.arange(self.bounds.left + 0.005, self.bounds.right, 0.01) # cols
         self.y_coords = np.arange(self.bounds.top - 0.005, self.bounds.bottom, -0.01) # rows
-        print(len(self.x_coords))
-        print(len(self.y_coords))
+
+        x_grid, y_grid = np.meshgrid(self.x_coords, self.y_coords)
+        self.grid_coords = np.column_stack((x_grid.flatten(), y_grid.flatten()))
         self.graph = self.build_graph()
         self.generate_heterodata()
+
 
     def flattened_id(self, row, col):
         return row * len(self.x_coords) + col
@@ -65,7 +67,7 @@ class RadarGraph():
 
 
         self.heterodata = HeteroData()
-        self.heterodata['radar'].x = datatensor
+        self.heterodata['radar'].x = datatensor.unsqueeze(-1)
         self.heterodata['radar', 'connect', 'radar'].edge_index = torch.tensor(list(self.graph.edges())).T
         return self.heterodata
 
