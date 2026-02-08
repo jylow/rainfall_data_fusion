@@ -96,7 +96,6 @@ class GaugeGraphNew():
 
               G.add_edge(node_id, neighbor_id, weight=dist)
 
-
         return G
 
     def initialise_masks(self):
@@ -138,23 +137,28 @@ class GaugeGraphNew():
                 mapping_df_indexed.loc[A]['order'],
                 mapping_df_indexed.loc[B]['order']
             ])
-        self.heterodata['raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
+        self.heterodata['raingauge', 'connects', 'raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
         self.heterodata['raingauge'].num_nodes = torch.tensor(self.heterodata['raingauge'].x.shape[0], dtype=torch.int32)
         return self.heterodata
 
 
+    def add_heterodata(self, radar_heterodata: HeteroData):
+        self.fused_train_heterodata = self.train_heterodata.clone()
+        self.fused_validation_heterodata = self.validation_heterodata.clone()
+        self.fused_test_heterodata = self.test_heterodata.clone()
+
+        for node_type in radar_heterodata.node_types:
+            self.fused_train_heterodata[node_type].x = radar_heterodata[node_type].x
+            self.fused_validation_heterodata[node_type].x = radar_heterodata[node_type].x
+            self.fused_test_heterodata[node_type].x = radar_heterodata[node_type].x
+
+        for edge_type in radar_heterodata.edge_types:
+            self.fused_train_heterodata[edge_type] = radar_heterodata[edge_type]
+            self.fused_validation_heterodata[edge_type] = radar_heterodata[edge_type]
+            self.fused_test_heterodata[edge_type] = radar_heterodata[edge_type]
 
 
-
-
-
-
-
-
-
-
-
-
+        return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 
 
 
@@ -162,79 +166,54 @@ class GaugeGraphNew():
     def visualise_graph_split(self):
 
         fig, ax = plt.subplots(1, 3, figsize=(30, 10))
+        mappings = self.mapping_df.set_index('id')
+        train_df = mappings.loc[list(self.train_graph.nodes)]
+        val_df = mappings.loc[list(self.validation_graph.nodes)]
+        test_df = mappings.loc[list(self.test_graph.nodes)]
+        print(train_df.iloc[0])
 
-        #1. Build the training graph
-        train_nx_graph = nx.Graph()
-        train_indices = torch.nonzero(self.train_graph.train_mask)
-        train_nx_graph.add_nodes_from(range(train_indices.shape[0]))
-        train_nx_graph.add_edges_from(self.train_graph.edge_index.numpy().T) # Get the edge indices from the graph
+        train_pos = {node: (row['longitude'], row['latitude']) 
+                 for node, row in train_df.iterrows()}
+        validation_pos = {node: (row['longitude'], row['latitude']) 
+                for node, row in val_df.iterrows()}
+        test_pos = {node: (row['longitude'], row['latitude']) 
+                    for node, row in test_df.iterrows()}
+        
+        train_stations = train_df.index
+        val_stations = val_df.index
+        val_colors = []
+        test_colors = []
+        for node in val_df.index:
+            if node in train_stations:
+                val_colors.append("blue")
+            else:
+                val_colors.append("green")
 
-        train_station_ids = [self.raingauge_order[x.item()] for x in train_indices]
-        train_station_locations = []
-        for id in train_station_ids:
-            lat, lon = self.station_dict[id]
-            train_station_locations.append((lon, lat))
-        print(train_station_ids)
-
-
-        #2. Build the validation graph
-        validation_nx_graph = nx.Graph()
-        # concatenate the validation and train masks
-        validation_indices = torch.concat([torch.nonzero(self.validation_graph.val_mask), torch.nonzero(self.validation_graph.train_mask)]).flatten()
-        validation_indices, _= torch.sort(validation_indices)
-        validation_nx_graph.add_nodes_from(range(validation_indices.shape[0]))
-        validation_nx_graph.add_edges_from(self.validation_graph.edge_index.numpy().T)
-
-        val_station_ids = [self.raingauge_order[x] for x in validation_indices]
-        val_station_locations = []
-        print(val_station_ids)
-        for id in val_station_ids:
-            lat, lon = self.station_dict[id]
-            val_station_locations.append((lon, lat))
-        val_station_colors = ["blue" for _ in range(len(val_station_locations))]
-
-        # Set validation stations to green
-        for i in range(len(val_station_colors)):
-            if val_station_ids[i] not in train_station_ids:
-                val_station_colors[i] = "green"
-
-
-        #3. Build the test graph
-        test_nx_graph = nx.Graph()
-        test_nx_graph.add_nodes_from(range(validation_indices.shape[0]))
-        test_nx_graph.add_edges_from(self.test_graph.edge_index.numpy().T)
-
-        test_station_ids = self.raingauge_order
-        test_station_locations = []
-        for id in test_station_ids:
-            lat, lon = self.station_dict[id]
-            test_station_locations.append((lon, lat))
-        print(test_station_ids)
-        test_station_colors = ["blue" for _ in range(len(test_station_locations))]
-
-        #Set validation stations to green and test stations to red
-        for i in range(len(test_station_colors)):
-            if test_station_ids[i] not in val_station_ids:
-                test_station_colors[i]= "red"
-            elif test_station_ids[i] not in train_station_ids:
-                test_station_colors[i] = "green"
+        for node in test_df.index:
+            if node in train_stations:
+                test_colors.append('blue')
+            elif node in val_stations:
+                test_colors.append('green')
+            else:
+                test_colors.append('red')
+    
 
         #4. Plotting
         nx.draw(
-            train_nx_graph,
-            train_station_locations,
+            self.train_graph,
+            pos=train_pos,
             ax=ax[0]
         )
         nx.draw(
-            validation_nx_graph,
-            val_station_locations,
-            node_color=val_station_colors,
+            self.validation_graph,
+            pos=validation_pos,
+            node_color = val_colors,
             ax=ax[1]
         )
         nx.draw(
-            test_nx_graph,
-            test_station_locations,
-            node_color=test_station_colors,
+            self.test_graph,
+            pos=test_pos,
+            node_color=test_colors,
             ax=ax[2]
         )
 
@@ -268,8 +247,8 @@ class HeterogeneousWeatherGraphDatasetInductive(Dataset):
         data = HeteroData()
         data['raingauge'].x = x
         data['raingauge'].y = y
-        data['raingauge', 'connects', 'raingauge'].edge_index = self.heterodata['raingauge'].edge_index
-        data['raingauge'].edge_attr = self.heterodata['raingauge'].edge_attr if hasattr(self.heterodata, 'edge_attr') else None
+        for edge_type in self.heterodata.edge_types:
+            data[edge_type].edge_index = self.heterodata[edge_type].edge_index
         data['raingauge'].mask = self.heterodata['raingauge'].mask
         data['raingauge'].num_nodes = self.heterodata['raingauge'].x.shape[0]
         return data

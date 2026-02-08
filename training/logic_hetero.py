@@ -47,9 +47,11 @@ def train_epoch(
             x_masked = x.clone()
             indices_to_mask = torch.arange(num_graphs, device=device) * x.shape[0] // num_graphs + node_pos
             x_masked[indices_to_mask] = 0.0
-            x_dict = {
-                'raingauge': x_masked
-            }
+
+            x_dict = {}
+            for nodetype in batch.node_types:
+                x_dict[nodetype] = batch[nodetype].x
+            x_dict['raingauge'] = x_masked
             out = model(x_dict, edge_index_dict)
 
             # Compute loss ONLY on trainable nodes
@@ -183,7 +185,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
             # ----- Collect outputs -----
             all_preds.append(out['raingauge'][mask].detach().cpu())
             all_targets.append(y[mask].detach().cpu())
-            all_station_ids.append(mask.nonzero(as_tuple=False).squeeze() % num_nodes)   # <-- FIXED
+            all_station_ids.append((mask.nonzero(as_tuple=False).squeeze() % num_nodes).cpu())   # <-- FIXED
 
             test_bar.set_postfix({"loss": loss.item()})
 

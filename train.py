@@ -49,7 +49,7 @@ def main(config):
 
     hidden_channels = 8
     out_channels = 1
-    num_layers = 5
+    num_layers = 8
     model_arr = []
     for i in range(fold_count):
         model_arr.append(
@@ -69,19 +69,19 @@ def main(config):
     for i in range(fold_count):
         train_loader = GeometricDataLoader(
         HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_train_heterodata()), #Need to convert to timestep wise data
-        batch_size=4096,
+        batch_size=batch_size,
         shuffle= False,
         )
 
         val_loader = GeometricDataLoader(
         HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_validation_heterodata()),
-        batch_size=4096,
+        batch_size=batch_size,
         shuffle=False,
         )
 
         test_loader = GeometricDataLoader(
         HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_test_heterodata()),
-        batch_size = 4096, 
+        batch_size = batch_size, 
         shuffle = False
         )
 
@@ -89,86 +89,86 @@ def main(config):
         val_loader_arr.append(val_loader)
         test_loader_arr.append(test_loader)
 
-        def train_fold(model, train_loader, val_loader, fold, device="cpu"):
-            # CHECK 1: Print initial weights
-            print("Training")
-            print(f"Device type: {device}")
-            first_param = next(model.parameters())
-            print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
+    def train_fold(model, train_loader, val_loader, fold, device="cpu"):
+        # CHECK 1: Print initial weights
+        print("Training")
+        print(f"Device type: {device}")
+        first_param = next(model.parameters())
+        print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
 
-            optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
-            training_loss_arr = []
-            validation_loss_arr = []
-            early = 0
-            mini = 1000
-            stopping_condition = 5
-            epochs = 0
-            total_epochs = 30
-            print(f"-----FOLD: {fold}-----")
-            training_start = time.time()
-            for i in range(total_epochs):
-                epoch_start = time.time()
-                print(f"-----EPOCH: {i + 1}-----")
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
+        training_loss_arr = []
+        validation_loss_arr = []
+        early = 0
+        mini = 1000
+        stopping_condition = 5
+        epochs = 0
+        total_epochs = 30
+        print(f"-----FOLD: {fold}-----")
+        training_start = time.time()
+        for i in range(total_epochs):
+            epoch_start = time.time()
+            print(f"-----EPOCH: {i + 1}-----")
 
-                # CHECK 2: Print weight before training
-                weight_before = first_param.data.clone()
+            # CHECK 2: Print weight before training
+            weight_before = first_param.data.clone()
 
-                train_loss = train_epoch(
-                    model,
-                    train_loader,
-                    optimizer,
-                    device,
-                    verbose=False,
-                    random_noise_masking=False,
-                )
-                print(train_loss)
-
-                # CHECK 3: Print weight after training
-                weight_after = first_param.data
-                weight_change = (weight_after - weight_before).abs().mean().item()
-                print(f"Weight change: {weight_change:.20f}")
-
-                validation_loss = validate(model, val_loader, device)
-                training_loss_arr.append(train_loss)
-                validation_loss_arr.append(validation_loss)
-                perf.log_epoch(i, train_loss, validation_loss)
-                if mini >= validation_loss:
-                    mini = validation_loss
-                    early = 0
-                else:
-                    early += 1
-                epochs += 1
-                if early >= stopping_condition:
-                    print("Early stop loss")
-                    break
-
-                print(f"Train Loss: {train_loss:.4f}")
-                print(f"Validation Loss: {validation_loss:.4f}")
-
-                # CHECK 4: Print gradient norms
-                total_norm = 0
-                for p in model.parameters():
-                    if p.grad is not None:
-                        total_norm += p.grad.data.norm(2).item() ** 2
-                total_norm = total_norm**0.5
-                print(f"Gradient norm: {total_norm:.6f}")
-                epoch_end = time.time()
-                print(f"epoch {i} took {epoch_end - epoch_start}")
-            training_end = time.time()
-            total_time = training_end - training_start
-            perf.finalise(total_time)
-
-            print(f"Training took {total_time} seconds over {epochs} epochs")
-            plt.plot(training_loss_arr, label="training_loss", color="blue")
-            plt.plot(validation_loss_arr, label="validation_loss", color="red")
-            plt.legend()
-            plt.savefig(f"experiments/{experiment_name}/train_loss_plot_{fold}.png", dpi=300)
-            plt.close()
-
-            torch.save(
-                model.state_dict(), f"experiments/{experiment_name}/weather_gnn_best_{fold}.pth"
+            train_loss = train_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                verbose=False,
+                random_noise_masking=False,
             )
-            print("✅ model weights saved to weather_gnn_best.pth")
+            print(train_loss)
+
+            # CHECK 3: Print weight after training
+            weight_after = first_param.data
+            weight_change = (weight_after - weight_before).abs().mean().item()
+            print(f"Weight change: {weight_change:.20f}")
+
+            validation_loss = validate(model, val_loader, device)
+            training_loss_arr.append(train_loss)
+            validation_loss_arr.append(validation_loss)
+            perf.log_epoch(i, train_loss, validation_loss)
+            if mini >= validation_loss:
+                mini = validation_loss
+                early = 0
+            else:
+                early += 1
+            epochs += 1
+            if early >= stopping_condition:
+                print("Early stop loss")
+                break
+
+            print(f"Train Loss: {train_loss:.4f}")
+            print(f"Validation Loss: {validation_loss:.4f}")
+
+            # CHECK 4: Print gradient norms
+            total_norm = 0
+            for p in model.parameters():
+                if p.grad is not None:
+                    total_norm += p.grad.data.norm(2).item() ** 2
+            total_norm = total_norm**0.5
+            print(f"Gradient norm: {total_norm:.6f}")
+            epoch_end = time.time()
+            print(f"epoch {i} took {epoch_end - epoch_start}")
+        training_end = time.time()
+        total_time = training_end - training_start
+        perf.finalise(total_time)
+
+        print(f"Training took {total_time} seconds over {epochs} epochs")
+        plt.plot(training_loss_arr, label="training_loss", color="blue")
+        plt.plot(validation_loss_arr, label="validation_loss", color="red")
+        plt.legend()
+        plt.savefig(f"experiments/{experiment_name}/train_loss_plot_{fold}.png", dpi=300)
+        plt.close()
+
+        torch.save(
+            model.state_dict(), f"experiments/{experiment_name}/weather_gnn_best_{fold}.pth"
+        )
+        print("✅ model weights saved to weather_gnn_best.pth")
 
     for i in range(fold_count):
         train_fold(model_arr[i], train_loader=train_loader_arr[i], val_loader=val_loader_arr[i], fold = i, device=device)

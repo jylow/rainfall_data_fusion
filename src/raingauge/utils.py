@@ -4,9 +4,9 @@ from torch_geometric.data import HeteroData
 
 
 def load_raingauge_dataset(
-    start:int, 
+    start:int,
     end: int,
-    uptime_threshold: int = 1,
+    uptime_threshold: float = 1.0,
     folder_path: str = 'database/raingauge_nea_data'
 ) -> tuple:
     """
@@ -14,7 +14,7 @@ def load_raingauge_dataset(
     ------
     dataset_name: .csv file
     """
-    
+
     #Process raingauge df
     print(f"Loading raingauge data from {start} to {end}")
     complete_raingauge_df = []
@@ -58,7 +58,7 @@ def load_raingauge_dataset(
 def filter_uptime(raingauge_df: pd.DataFrame, uptime_threshold = 0.9) -> pd.DataFrame:
     '''
     Filters dataframe for threshold where we keep only stations with >threshold uptime
-    
+
     :param df: Description
     :return: Description
     :rtype: DataFrame
