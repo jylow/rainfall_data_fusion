@@ -296,7 +296,7 @@ class GNNInductiveHetero(torch.nn.Module):
         for layer_idx in range(num_layers):
             conv = HeteroConv({
                 ('raingauge', 'connects', 'raingauge'):
-                    GraphConv((-1, -1), hidden_channels),
+                    GraphConv(hidden_channels, hidden_channels),
             }, aggr='sum')
 
             self.convs.append(conv)
@@ -314,7 +314,7 @@ class GNNInductiveHetero(torch.nn.Module):
             h_dict = conv(
                 h_dict,
                 edge_index_dict,
-                edge_attr_dict,
+                edge_weight_dict = edge_attr_dict,
             )
 
             # Apply activation after each layer

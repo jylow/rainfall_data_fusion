@@ -38,9 +38,13 @@ def train_epoch(
         y = batch['raingauge'].y  # [B*N, Tgt]
         mask = batch['raingauge'].mask  # [N] - PROBLEM: single mask for one graph
         edge_index_dict = batch.edge_index_dict
-        edge_attr_dict = batch.edge_attr_dict 
         num_graphs = batch['raingauge'].ptr.size(0) - 1
         num_nodes = x.shape[0] // num_graphs
+
+        edge_attr_dict = {
+            edge_type: batch[edge_type].edge_attr
+            for edge_type in batch.edge_types
+        }
 
         batch_loss = torch.tensor(0.0, device=device)
         for node_pos in range(num_nodes):

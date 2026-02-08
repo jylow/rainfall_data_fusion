@@ -121,23 +121,27 @@ class GaugeGraphNew():
         match graph:
             case "train":
               self.heterodata['raingauge'].mask = torch.tensor(self.train_mask, dtype=bool)
-              edges = self.train_graph.edges()
+              edges = self.train_graph.edges(data=True)
             case "validation":
               self.heterodata['raingauge'].mask = torch.tensor(self.val_mask, dtype=bool)
-              edges = self.validation_graph.edges()
+              edges = self.validation_graph.edges(data=True)
             case "test":
               self.heterodata['raingauge'].mask = torch.tensor(self.test_mask, dtype=bool)
-              edges = self.test_graph.edges()
+              edges = self.test_graph.edges(data=True)
 
         
         edge_index = []
+        edge_attr = []
         mapping_df_indexed = self.mapping_df.set_index('id')
-        for A, B in edges:
+        for A, B, data in edges:
             edge_index.append([
                 mapping_df_indexed.loc[A]['order'],
                 mapping_df_indexed.loc[B]['order']
             ])
+            weight = data['weight']
+            edge_attr.append(weight)
         self.heterodata['raingauge', 'connects', 'raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
+        self.heterodata['raingauge', 'connects', 'raingauge'].edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
         self.heterodata['raingauge'].num_nodes = torch.tensor(self.heterodata['raingauge'].x.shape[0], dtype=torch.int32)
         return self.heterodata
 
@@ -202,18 +206,21 @@ class GaugeGraphNew():
         nx.draw(
             self.train_graph,
             pos=train_pos,
+            with_labels=True,
             ax=ax[0]
         )
         nx.draw(
             self.validation_graph,
             pos=validation_pos,
             node_color = val_colors,
+            with_labels=True,
             ax=ax[1]
         )
         nx.draw(
             self.test_graph,
             pos=test_pos,
             node_color=test_colors,
+            with_labels=True,
             ax=ax[2]
         )
 
@@ -249,6 +256,7 @@ class HeterogeneousWeatherGraphDatasetInductive(Dataset):
         data['raingauge'].y = y
         for edge_type in self.heterodata.edge_types:
             data[edge_type].edge_index = self.heterodata[edge_type].edge_index
+            data[edge_type].edge_attr = self.heterodata[edge_type].edge_attr
         data['raingauge'].mask = self.heterodata['raingauge'].mask
         data['raingauge'].num_nodes = self.heterodata['raingauge'].x.shape[0]
         return data
