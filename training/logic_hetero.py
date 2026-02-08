@@ -44,6 +44,7 @@ def train_epoch(
         edge_attr_dict = {
             edge_type: batch[edge_type].edge_attr
             for edge_type in batch.edge_types
+            if hasattr(batch[edge_type], 'edge_attr')
         }
 
         batch_loss = torch.tensor(0.0, device=device)
@@ -112,6 +113,11 @@ def validate(
             y = batch['raingauge'].y  # [B*N, Tgt] - already batched and flattened
             val_mask = batch['raingauge'].mask  # [N] - single mask for one graph
             edge_index_dict = batch.edge_index_dict  # [2, E*B] - offset edge indices
+            edge_attr_dict = {
+                edge_type: batch[edge_type].edge_attr
+                for edge_type in batch.edge_types
+                if hasattr(batch[edge_type], 'edge_attr')
+            }
 
             x_masked = x.clone()
             x_masked[val_mask] = 0.0
@@ -121,7 +127,7 @@ def validate(
             }
 
             # Forward pass
-            out = model(x_dict, edge_index_dict)  # [B*N, out_channels]
+            out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
 
             loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
             epoch_losses.append(loss.item())
@@ -176,11 +182,17 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
             x_masked = x.clone()
             x_masked[mask] = 0.0
 
+            edge_attr_dict = {
+                edge_type: batch[edge_type].edge_attr
+                for edge_type in batch.edge_types
+                if hasattr(batch[edge_type], 'edge_attr')
+            }
+
             x_dict = {
                 'raingauge': x_masked
             }
             # ----- Model forward -----
-            out = model(x_dict, edge_index)
+            out = model(x_dict, edge_index, edge_attr_dict)
 
             # ----- Compute test loss -----
             loss = F.mse_loss(out['raingauge'][mask], y[mask])
