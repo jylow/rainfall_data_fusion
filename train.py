@@ -103,7 +103,7 @@ def main(config):
         mini = 1000
         stopping_condition = 5
         epochs = 0
-        total_epochs = 30
+        total_epochs = 10
         print(f"-----FOLD: {fold}-----")
         training_start = time.time()
         for i in range(total_epochs):

@@ -307,13 +307,14 @@ class GNNInductiveHetero(torch.nn.Module):
         # self.norm_general = torch.nn.LayerNorm(hidden_channels)
         # self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
 
-    def forward(self, x_dict, edge_index_dict):
+    def forward(self, x_dict, edge_index_dict, edge_attr_dict):
         h_dict = x_dict
 
         for conv in self.convs:
             h_dict = conv(
                 h_dict,
                 edge_index_dict,
+                edge_attr_dict,
             )
 
             # Apply activation after each layer

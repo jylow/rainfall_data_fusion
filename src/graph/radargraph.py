@@ -1,18 +1,16 @@
 
 import pandas as pd
 import numpy as np
+import torch
 import matplotlib.pyplot as plt
 import networkx as nx
-import torch
-from torch_geometric.data import Data
 
-
-from src.utils import generate_homogeneous_edges, add_homogeneous_edge_attributes_to_data
+from torch_geometric.data import HeteroData
 
 
 class RadarGraph():
 
-    def __init__(self, df: pd.DataFrame, knn: int):
+    def __init__(self, df: pd.DataFrame):
         """
         node_feature_dict: contains information on heterogeneous node
         station_lists: reference to maintain mapping of stations to node orderings
@@ -22,32 +20,54 @@ class RadarGraph():
         self.dtype = torch.float32
         self.data = df['data'] #(rows * cols)
         self.bounds = df.iloc[0]['bounds']
-        self.x_coords = np.arange(self.bounds.left + 0.005, self.bounds.right, 0.01)
-        self.y_coords = np.arange(self.bounds.top - 0.005, self.bounds.bottom, -0.01)
-      
+        self.x_coords = np.arange(self.bounds.left + 0.005, self.bounds.right, 0.01) # cols
+        self.y_coords = np.arange(self.bounds.top - 0.005, self.bounds.bottom, -0.01) # rows
+        print(len(self.x_coords))
+        print(len(self.y_coords))
+        self.graph = self.build_graph()
+        self.generate_heterodata()
 
+    def flattened_id(self, row, col):
+        return row * len(self.x_coords) + col
 
-        self.knn = knn
-
-    def build_graph(self, split: str, stations) -> Data:
+    def build_graph(self):
         '''
         BUILDS A GRAPH FOR TRAIN/VALIDATION/TEST
         '''
 
-        G = nx.graph()
+        G = nx.Graph()
 
         for row in range(len(self.y_coords)):
             for col in range(len(self.x_coords)):
-                node_id = (self.x_coords[row], self.y_coords[col])
-                G.add_node(node_id, pos = tuple(self.data[row][col]))
+                node_id = self.flattened_id(row, col)
+                G.add_node(node_id, pos = (self.y_coords[row], self.x_coords[col]))
 
         for row in range(len(self.y_coords)):
             for col in range(len(self.x_coords)):
+                node_id = self.flattened_id(row, col)
                 neighbors = [
                     (row-1, col-1), (row-1, col), (row-1, row+1),  # top row
-                    (i, col-1),             (row, col+1),    # left and right
+                    (row, col-1),             (row, col+1),    # left and right
                     (row+1, col-1), (row+1, col), (row+1, col+1)   # bottom row
                 ]
 
-        return split_graph
+                for nrow, ncol in neighbors:
+                    if 0 <= nrow < len(self.y_coords) and 0 <= ncol < len(self.x_coords):
+                        neighbor_id = self.flattened_id(nrow, ncol)
+                        G.add_edge(node_id, neighbor_id)
 
+        return G
+    
+    def generate_heterodata(self):
+        #Convert data in dataframe to tensor
+        stack_data = np.stack(self.data.tolist())
+        datatensor = torch.tensor(stack_data.T.reshape(stack_data.shape[1] * stack_data.shape[2], -1))
+
+
+        self.heterodata = HeteroData()
+        self.heterodata['radar'].x = datatensor
+        self.heterodata['radar', 'connect', 'radar'].edge_index = torch.tensor(list(self.graph.edges())).T
+        return self.heterodata
+
+    def get_radar_heterodata(self) -> HeteroData:
+        return self.heterodata

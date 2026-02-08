@@ -38,7 +38,7 @@ def train_epoch(
         y = batch['raingauge'].y  # [B*N, Tgt]
         mask = batch['raingauge'].mask  # [N] - PROBLEM: single mask for one graph
         edge_index_dict = batch.edge_index_dict
-        #edge_attr = batch.edge_attr if batch.edge_attr is not None else None
+        edge_attr_dict = batch.edge_attr_dict 
         num_graphs = batch['raingauge'].ptr.size(0) - 1
         num_nodes = x.shape[0] // num_graphs
 
@@ -52,7 +52,7 @@ def train_epoch(
             for nodetype in batch.node_types:
                 x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
-            out = model(x_dict, edge_index_dict)
+            out = model(x_dict, edge_index_dict, edge_attr_dict)
 
             # Compute loss ONLY on trainable nodes
             loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
