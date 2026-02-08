@@ -172,8 +172,8 @@ class HomogeneousWeatherGraphDatasetInductive(Dataset):
         self.mode = mode
         self.device = device
 
-        # Graph has shape [T, N, F]
-        self.num_timesteps = graph.x.shape[0]
+        # Graph has shape [N, T, F]
+        self.num_timesteps = graph.x.shape[1]
 
         if mode == "train":
             self.mask = graph.train_mask

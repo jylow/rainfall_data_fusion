@@ -2,6 +2,7 @@ import torch
 import tqdm
 import numpy as np
 import torch.nn.functional as F
+import time
 
 import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
@@ -52,32 +53,7 @@ def train_epoch(
             loss = F.mse_loss(out[indices_to_mask], y[indices_to_mask])
             batch_loss += loss
 
-            # Check gradients before backward
-            #loss.backward()
 
-            # Check if any gradients were computed
-            # total_grad_norm = 0.0
-            # num_params_with_grad = 0
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         grad_norm = param.grad.norm().item()
-            #         total_grad_norm += grad_norm**2
-            #         num_params_with_grad += 1
-            #         if verbose and grad_norm > 1e-6:
-            #             print(f"  {name}: grad_norm={grad_norm:.2e}")
-            #     elif verbose or batch_idx == 0:
-            #         print(f"  {name}: NO GRADIENT")
-
-            # total_grad_norm = np.sqrt(total_grad_norm)
-
-            # if num_params_with_grad == 0:
-            #     print(f"ERROR: No gradients computed in batch {batch_idx}!")
-            #     return None
-
-            # if total_grad_norm < 1e-8 and batch_idx % 20 == 0:
-            #     print(
-            #         f"WARNING: Very small gradient norm {total_grad_norm:.2e} in batch {batch_idx}"
-            #     )
         batch_loss = batch_loss / num_nodes
         if scheduler is not None:
             scheduler.step()
@@ -95,6 +71,74 @@ def train_epoch(
         optimizer.step()
 
     return float(np.mean(epoch_losses))
+
+
+def train_epoch_hetero(
+    model,
+    dataloader,
+    optimizer,
+    device,
+    verbose=False,
+    log_file="training_gnn_new_debug.log",
+    random_noise_masking=False,
+    scheduler=None,
+):
+    """
+    Corrected training loop with gradient debugging.
+    """
+    model.train()
+    epoch_losses = []
+    charge_bar = tqdm.tqdm(dataloader, desc="training")
+
+    for batch_idx, batch in enumerate(charge_bar):
+
+        optimizer.zero_grad()
+
+        # PyG Batch object - move to device
+        batch = batch.to(device)
+
+        # Extract from PyG Batch format
+        x = batch['raingauge'].x  # [B*N, F]
+        y = batch['raingauge'].y  # [B*N, Tgt]
+        mask = batch['raingauge'].mask  # [N] - PROBLEM: single mask for one graph
+        edge_index_dict = batch.edge_index_dict
+        #edge_attr = batch.edge_attr if batch.edge_attr is not None else None
+        num_graphs = batch['raingauge'].ptr.size(0) - 1
+        num_nodes = x.shape[0] // num_graphs
+
+        batch_loss = torch.tensor(0.0, device=device)
+        for node_pos in range(num_nodes):
+            x_masked = x.clone()
+            indices_to_mask = torch.arange(num_graphs, device=device) * x.shape[0] // num_graphs + node_pos
+            x_masked[indices_to_mask] = 0.0
+            x_dict = {
+                'raingauge': x_masked
+            }
+            out = model(x_dict, edge_index_dict)
+
+            # Compute loss ONLY on trainable nodes
+            loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
+            batch_loss += loss
+
+
+        batch_loss = batch_loss / num_nodes
+        if scheduler is not None:
+            scheduler.step()
+        batch_loss.backward()
+
+
+        epoch_losses.append(batch_loss.item())
+        charge_bar.set_postfix(
+            {
+                "loss": batch_loss.item(),
+                #"grad_norm": total_grad_norm,
+            }
+        )
+        #Step only at the end of each batch
+        optimizer.step()
+
+    return float(np.mean(epoch_losses))
+
 
 def validate(
     model, dataloader, device, verbose=False, log_file="validation_gnn_new_debug.log"

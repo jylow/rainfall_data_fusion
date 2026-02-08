@@ -278,8 +278,8 @@ class GNNInductiveHetero(torch.nn.Module):
         Args:
             in_channels_dict: dict 
                 {
-                    'general_station': F_g,
-                    'rainfall_station': F_r
+                    'raingauge': F_g,
+                    'radar': F_r
                 }
         """
         super().__init__()
@@ -295,52 +295,25 @@ class GNNInductiveHetero(torch.nn.Module):
 
         for layer_idx in range(num_layers):
             conv = HeteroConv({
-                ('general_station', 'gen_to_gen', 'general_station'):
-                    GraphConv((-1, -1), hidden_channels),
-
-                ('general_station', 'gen_to_rain', 'rainfall_station'):
-                    GraphConv((-1, -1), hidden_channels),
-
-                ('rainfall_station', 'rain_to_gen', 'general_station'):
-                    GraphConv((-1, -1), hidden_channels),
-
-                ('rainfall_station', 'rain_to_rain', 'rainfall_station'):
+                ('raingauge', 'connects', 'raingauge'):
                     GraphConv((-1, -1), hidden_channels),
             }, aggr='sum')
 
             self.convs.append(conv)
 
-        self.lin_general = Linear(hidden_channels, out_channels)
-        self.lin_rainfall = Linear(hidden_channels, out_channels)
+        self.lin= Linear(hidden_channels, out_channels)
 
         # # Optional: normalization
         # self.norm_general = torch.nn.LayerNorm(hidden_channels)
         # self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
 
-    def forward(self, x_dict, edge_index_dict, edge_attr_dict=None):
-        """
-        Args:
-            x_dict:
-                {
-                    'general_station': [N_gen, F_g],
-                    'rainfall_station': [N_rain, F_r],
-                }
-            edge_index_dict:
-                {
-                    ('general_station','gen_to_gen','general_station'): edge_index,
-                    ('general_station','gen_to_rain','rainfall_station'): edge_index,
-                    ...
-                }
-            edge_attr_dict: (optional) same key structure as edge_index_dict
-        """
-
+    def forward(self, x_dict, edge_index_dict):
         h_dict = x_dict
 
         for conv in self.convs:
             h_dict = conv(
                 h_dict,
                 edge_index_dict,
-                edge_attr_dict if edge_attr_dict is not None else None
             )
 
             # Apply activation after each layer
@@ -352,8 +325,7 @@ class GNNInductiveHetero(torch.nn.Module):
 
         # Output prediction heads
         out_dict = {
-            'general_station': self.lin_general(h_dict['general_station']),
-            'rainfall_station': self.lin_rainfall(h_dict['rainfall_station']),
+            'raingauge': self.lin(h_dict['raingauge']),
         }
 
         return out_dict

@@ -82,37 +82,8 @@ def add_homogeneous_weather_station_data(
     rainfall_station_target_tensor = torch.tensor(
         np.array(rainfall_station_features).transpose(1,0), dtype=dtype
     )
-    '''
-    # --- Add station IDs ---
-    # Number of general + rainfall stations
-    if general_station_features:
-        N_gen = np.array(general_station_features).shape[0]
-    N_rain = np.array(rainfall_station_features).shape[0]
-
-    # --- Assign General Station IDs ---
-    if general_station_ids is not None and isinstance(general_station_ids, int):
-        gen_ids = torch.tensor(np.array(general_station_ids), dtype=torch.long)
-    else:
-        gen_ids = torch.tensor(np.arange(N_gen), dtype=torch.long)
-
-    # --- Assign Rainfall Station IDs with OFFSET ---
-    if rainfall_station_ids is not None and isinstance(rainfall_station_ids, int):
-        rain_ids = torch.tensor(np.array(rainfall_station_ids), dtype=torch.long)
-    else:
-        rain_ids = torch.tensor(np.arange(N_gen, N_gen + N_rain), dtype=torch.long)
-    '''
-
     rain_ids = torch.tensor(np.arange(np.array(rainfall_station_features).shape[0]), dtype = torch.long)
-    # print("\n=== Station ID Mapping ===")
-    # print("\nGeneral Stations:")
-    # for name, sid in zip(general_station_features, gen_ids):
-    #     print(f"  {name}  →  {sid}")
 
-    # print("\nRainfall Stations (Offset IDs):")
-    # for name, sid in zip(rainfall_station_features, rain_ids):
-    #     print(f"  {name}  →  {sid}")
-
-    # print("\nTotal Stations:", len(gen_ids) + len(rain_ids))
     if general_station_features:
         station_data_tensor = torch.concat(
             [general_station_data_tensor, rainfall_station_data_tensor], dim=1
