@@ -172,7 +172,7 @@ def main(config):
 
     for i in range(fold_count):
         train_fold(model_arr[i], train_loader=train_loader_arr[i], val_loader=val_loader_arr[i], fold = i)
-        RMSE = test_model(model_arr[0], raingauge_station_mappings_df, test_loader_arr[i], device, fold=0, experiment_name=experiment_name)
+        RMSE = test_model(model_arr[i], raingauge_station_mappings_df, test_loader_arr[i], device, fold=i, experiment_name=experiment_name)
 
 if __name__ == '__main__':
     #Read configuration file
