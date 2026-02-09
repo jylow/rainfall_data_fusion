@@ -189,5 +189,5 @@ def train_fold(model, train_loader, val_loader, fold, device="cpu"):
     print("✅ model weights saved to weather_gnn_best.pth")
 
 for i in range(fold_count):
-  train_fold(model_arr[i], train_loader=train_loader_arr[i], val_loader=val_loader_arr[i], fold = i)
+  train_fold(model_arr[i], train_loader=train_loader_arr[i], val_loader=val_loader_arr[i], fold = i, device=device)
   RMSE = test_model(model_arr[i], raingauge_station_mappings_df, test_loader_arr[i], device, fold = i, experiment_name=experiment_name)

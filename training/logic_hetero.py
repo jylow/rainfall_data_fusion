@@ -55,7 +55,7 @@ def train_epoch(
 
             x_dict = {}
             for nodetype in batch.node_types:
-                x_dict[nodetype] = batch[nodetype].x
+                x_dict[nodetype] = batch[nodetype].x.to(device)
             x_dict['raingauge'] = x_masked
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
