@@ -60,7 +60,6 @@ for i in range(fold_count):
   radar_graph = RadarGraph(radar_df)
   radar_heterodata = radar_graph.get_radar_heterodata()
   radar_heterodata = ToUndirected()(radar_heterodata)
-  gauge_graph = ToUndirected()(gauge_graph)
   gauge_graph.add_heterodata(radar_heterodata=radar_heterodata, coords = radar_graph.grid_coords)
   gauge_graph_arr.append(gauge_graph)
 

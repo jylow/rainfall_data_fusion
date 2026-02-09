@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import torch
 from torch_geometric.data import HeteroData
+from torch_geometric.transforms import ToUndirected
 from torch.utils.data import Dataset
 from sklearn.neighbors import NearestNeighbors
 from typing import Literal
@@ -36,6 +37,10 @@ class GaugeGraphNew():
         self.train_graph = self.build_graph("train")
         self.validation_graph = self.build_graph("validation")
         self.test_graph = self.build_graph("test")
+
+        self.train_graph = ToUndirected(self.train_graph)
+        self.validation_graph = ToUndirected(self.validation_graph)
+        self.test_graph = ToUndirected(self.test_graph)
 
         self.train_heterodata = self.fill_heterodata("train")
         self.validation_heterodata = self.fill_heterodata("validation")
@@ -274,6 +279,7 @@ class GaugeGraphNew():
 
 
 class HeterogeneousWeatherGraphDatasetInductive(Dataset):
+
     def __init__(self, heterodata, device="cpu"):
 
         self.heterodata = heterodata
