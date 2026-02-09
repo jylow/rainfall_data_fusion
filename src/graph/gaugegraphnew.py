@@ -27,6 +27,9 @@ class GaugeGraphNew():
         self.validation_gauges = split_info['ml']['validation']
         self.test_gauges = split_info['ml']['test']
         self.heterodata = HeteroData()
+        self.fused_test_heterodata=None
+        self.fused_train_heterodata=None
+        self.fused_validation_heterodata=None
 
         self.train_mask, self.val_mask, self.test_mask = self.initialise_masks()
 

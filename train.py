@@ -9,6 +9,7 @@ import yaml
 from datetime import datetime
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader as GeometricDataLoader
+from torch_geometric.transforms import ToUndirected
 
 from src.performance_logger import PerformanceLogger
 from models.gnn import GNNInductiveHetero
@@ -45,7 +46,9 @@ def main(config):
     gauge_graph_arr = []
     for i in range(fold_count):
         gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
+        gauge_graph = ToUndirected(gauge_graph)
         gauge_graph_arr.append(gauge_graph)
+    
 
     hidden_channels = 8
     out_channels = 1
