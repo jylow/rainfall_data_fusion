@@ -8,5 +8,5 @@
 
 . venv/bin/activate
 
-srun python GNN_homogeneous_inductive.py
+srun python train_fused.py
 
