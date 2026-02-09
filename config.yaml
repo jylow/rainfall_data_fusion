@@ -1,7 +1,6 @@
 # dataset creation parameters
 dataset_parameters:
   database_folder: 'database'
-  raingauge_file: 'raingauge_data_2021_2025.csv'
   start_year: 2024
   end_year: 2025
   radar_folder: 'sg_radar_data_cropped'
@@ -29,4 +28,4 @@ filters:
 training_params:
   fold_count: 1
   seed: 123
-  batch_size: 4096
+  batch_size: 1024

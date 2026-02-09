@@ -27,7 +27,6 @@ class GaugeGraphNew():
         self.train_gauges = split_info["ml"]['train']
         self.validation_gauges = split_info['ml']['validation']
         self.test_gauges = split_info['ml']['test']
-        self.heterodata = HeteroData()
         self.fused_test_heterodata=None
         self.fused_train_heterodata=None
         self.fused_validation_heterodata=None
@@ -132,19 +131,19 @@ class GaugeGraphNew():
         return train_mask, validation_mask, test_mask
 
     def fill_heterodata(self, graph: str) -> HeteroData:
-
-        self.heterodata['raingauge'].x = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
-        self.heterodata['raingauge'].y = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
+        heterodata = HeteroData()
+        heterodata['raingauge'].x = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
+        heterodata['raingauge'].y = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
 
         match graph:
             case "train":
-              self.heterodata['raingauge'].mask = torch.tensor(self.train_mask, dtype=bool)
+              heterodata['raingauge'].mask = torch.tensor(self.train_mask, dtype=bool)
               edges = self.train_graph.edges(data=True)
             case "validation":
-              self.heterodata['raingauge'].mask = torch.tensor(self.val_mask, dtype=bool)
+              heterodata['raingauge'].mask = torch.tensor(self.val_mask, dtype=bool)
               edges = self.validation_graph.edges(data=True)
             case "test":
-              self.heterodata['raingauge'].mask = torch.tensor(self.test_mask, dtype=bool)
+              heterodata['raingauge'].mask = torch.tensor(self.test_mask, dtype=bool)
               edges = self.test_graph.edges(data=True)
 
         
@@ -158,10 +157,10 @@ class GaugeGraphNew():
             ])
             weight = data['weight']
             edge_attr.append(weight)
-        self.heterodata['raingauge', 'connects', 'raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
-        self.heterodata['raingauge', 'connects', 'raingauge'].edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
-        self.heterodata['raingauge'].num_nodes = torch.tensor(self.heterodata['raingauge'].x.shape[0], dtype=torch.int32)
-        return self.heterodata
+        heterodata['raingauge', 'connects', 'raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
+        heterodata['raingauge', 'connects', 'raingauge'].edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
+        heterodata['raingauge'].num_nodes = torch.tensor(heterodata['raingauge'].x.shape[0], dtype=torch.int32)
+        return heterodata
 
 
     def add_heterodata(self, radar_heterodata: HeteroData, coords, knn=4):

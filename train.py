@@ -59,7 +59,7 @@ for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
   gauge_graph_arr.append(gauge_graph)
 
-hidden_channels = 4
+hidden_channels = 8
 out_channels = 1
 num_layers = 8
 model_arr = []
@@ -72,7 +72,7 @@ for i in range(fold_count):
       hidden_channels = hidden_channels,
       out_channels=out_channels, 
       num_layers = num_layers,
-      edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
+      edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types
     ).to(device=device)
   )
 
