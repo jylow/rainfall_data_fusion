@@ -36,7 +36,7 @@ def train_epoch(
         # Extract from PyG Batch format
         x = batch['raingauge'].x  # [B*N, F]
         y = batch['raingauge'].y  # [B*N, Tgt]
-        mask = batch['raingauge'].mask  # [N] - PROBLEM: single mask for one graph
+
         edge_index_dict = batch.edge_index_dict
         num_graphs = batch['raingauge'].ptr.size(0) - 1
         num_nodes = x.shape[0] // num_graphs

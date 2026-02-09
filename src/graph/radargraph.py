@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 
 from torch_geometric.data import HeteroData
+from torch_geometric.transforms import ToUndirected
 
 
 class RadarGraph():
@@ -69,6 +70,8 @@ class RadarGraph():
         self.heterodata = HeteroData()
         self.heterodata['radar'].x = datatensor.unsqueeze(-1)
         self.heterodata['radar', 'connect', 'radar'].edge_index = torch.tensor(list(self.graph.edges())).T
+        self.heterodata['radar', 'connect', 'radar'].edge_attr = torch.ones(self.heterodata['radar', 'connect', 'radar'].edge_index.shape[1])
+        self.heterodata = ToUndirected()(self.heterodata)
         return self.heterodata
 
     def get_radar_heterodata(self) -> HeteroData:
