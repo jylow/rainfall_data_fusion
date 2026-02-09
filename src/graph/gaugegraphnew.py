@@ -333,7 +333,7 @@ class HeterogeneousWeatherGraphDatasetInductive(Dataset):
             data[edge_type].edge_index = self.heterodata[edge_type].edge_index
             if edge_type == ('raingauge', 'connects', 'raingauge'):
                 data[edge_type].edge_attr = self.heterodata[edge_type].edge_attr
-        data['raingauge'].mask = self.heterodata['raingauge'].mask
+        data['raingauge'].mask = torch.tensor(self.heterodata['raingauge'].mask)
         data['raingauge'].num_nodes = self.heterodata['raingauge'].x.shape[0]
         for node_type in self.heterodata.node_types:
             if node_type == 'raingauge':

@@ -317,21 +317,11 @@ class GNNInductiveHetero(torch.nn.Module):
         h_dict = x_dict
 
         for conv in self.convs:
-            if edge_attr_dict is not None and ('raingauge', 'connects', 'raingauge') in edge_index_dict:
-                filtered_edge_weight = {
-                    ('raingauge', 'connects', 'raingauge') :edge_attr_dict[('raingauge', 'connects', 'raingauge')]
-                }
-                h_dict = conv(
-                    h_dict,
-                    edge_index_dict,
-                    edge_weight_dict = filtered_edge_weight,
-                )
-
-            else:
-                h_dict = conv(
-                    h_dict,
-                    edge_index_dict,
-                )
+            h_dict = conv(
+                h_dict,
+                edge_index_dict,
+                edge_weight_dict = edge_attr_dict,
+            )
 
             # Apply activation after each layer
             h_dict = {k: F.relu(v) for k, v in h_dict.items()}
