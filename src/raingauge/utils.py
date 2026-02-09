@@ -18,7 +18,7 @@ def load_raingauge_dataset(
     #Process raingauge df
     print(f"Loading raingauge data from {start} to {end}")
     complete_raingauge_df = []
-    for year in range(start, end):
+    for year in range(start, end + 1):
         filepath = f"{folder_path}/{year}/weather_station_data_{year}.csv"
         print(f"Loading raingauge_dataset from {filepath}")
         raingauge_df = pd.read_csv(filepath)

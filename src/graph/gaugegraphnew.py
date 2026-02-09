@@ -52,13 +52,22 @@ class GaugeGraphNew():
         return self.test_graph
     
     def get_train_heterodata(self):
-        return self.train_heterodata
+        if self.fused_train_heterodata:
+            return self.fused_train_heterodata
+        else:
+            return self.train_heterodata
 
     def get_validation_heterodata(self):
-        return self.validation_heterodata
+        if self.fused_validation_heterodata:
+            return self.fused_validation_heterodata
+        else:
+            return self.validation_heterodata
 
     def get_test_heterodata(self):
-        return self.test_heterodata
+        if self.fused_test_heterodata:
+            return self.fused_test_heterodata
+        else:
+            return self.test_heterodata
 
     def build_graph(self, split: str):
         '''
@@ -146,7 +155,7 @@ class GaugeGraphNew():
         return self.heterodata
 
 
-    def add_heterodata(self, radar_heterodata: HeteroData):
+    def add_heterodata(self, radar_heterodata: HeteroData, coords, knn=4):
         self.fused_train_heterodata = self.train_heterodata.clone()
         self.fused_validation_heterodata = self.validation_heterodata.clone()
         self.fused_test_heterodata = self.test_heterodata.clone()
@@ -157,14 +166,46 @@ class GaugeGraphNew():
             self.fused_test_heterodata[node_type].x = radar_heterodata[node_type].x
 
         for edge_type in radar_heterodata.edge_types:
-            self.fused_train_heterodata[edge_type] = radar_heterodata[edge_type]
-            self.fused_validation_heterodata[edge_type] = radar_heterodata[edge_type]
-            self.fused_test_heterodata[edge_type] = radar_heterodata[edge_type]
+            self.fused_train_heterodata[edge_type].edge_index = radar_heterodata[edge_type].edge_index
+            self.fused_validation_heterodata[edge_type].edge_index = radar_heterodata[edge_type].edge_index
+            self.fused_test_heterodata[edge_type].edge_index = radar_heterodata[edge_type].edge_index
 
+        #Connect the raingauge and the radar
+        raingauge_coords = list(zip(self.mapping_df['longitude'], self.mapping_df['latitude']))
+
+        connecting_edges = self.connect_graphs(raingauge_coords, coords)
+        connecting_edges_tensor = torch.tensor(connecting_edges).T
+        self.fused_train_heterodata['raingauge', 'connects', 'radar'].edge_index = connecting_edges_tensor
+        self.fused_validation_heterodata['raingauge', 'connects', 'radar'].edge_index = connecting_edges_tensor
+        self.fused_test_heterodata['raingauge', 'connects', 'radar'].edge_index = connecting_edges_tensor
+
+        self.fused_train_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = connecting_edges_tensor.flip(0)
+        self.fused_validation_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = connecting_edges_tensor.flip(0)
+        self.fused_test_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = connecting_edges_tensor.flip(0)
 
         return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 
+    def connect_graphs(self, raingauge_coords, other_coords, knn=4):
+        edges = []
+        A_coords = np.radians(np.array(raingauge_coords))
+        B_coords = np.radians(np.array(other_coords))
 
+        
+        # Use haversine metric
+        nearestNeighbors = NearestNeighbors(n_neighbors=knn, metric='haversine')
+        nearestNeighbors.fit(B_coords)
+        
+        distances, indices = nearestNeighbors.kneighbors(A_coords)
+
+        # Create edge list
+        edge_list = []
+        for i in range(len(raingauge_coords)):
+            for j in range(knn):
+                edge_list.append((i, indices[i, j]))
+        return edge_list
+
+    def get_fused_heterodata(self):
+        return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 
 
     def visualise_graph_split(self):
@@ -256,7 +297,12 @@ class HeterogeneousWeatherGraphDatasetInductive(Dataset):
         data['raingauge'].y = y
         for edge_type in self.heterodata.edge_types:
             data[edge_type].edge_index = self.heterodata[edge_type].edge_index
-            data[edge_type].edge_attr = self.heterodata[edge_type].edge_attr
+            if edge_type == ('raingauge', 'connects', 'raingauge'):
+                data[edge_type].edge_attr = self.heterodata[edge_type].edge_attr
         data['raingauge'].mask = self.heterodata['raingauge'].mask
         data['raingauge'].num_nodes = self.heterodata['raingauge'].x.shape[0]
+        for node_type in self.heterodata.node_types:
+            if node_type == 'raingauge':
+                continue
+            data[node_type].x = self.heterodata[node_type].x[:, idx, :]
         return data

@@ -273,7 +273,7 @@ class GNNInductive(torch.nn.Module):
         return out
 
 class GNNInductiveHetero(torch.nn.Module):
-    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers, edge_types):
         """
         Args:
             in_channels_dict: dict 
@@ -294,10 +294,16 @@ class GNNInductiveHetero(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
 
         for layer_idx in range(num_layers):
-            conv = HeteroConv({
-                ('raingauge', 'connects', 'raingauge'):
-                    GraphConv(hidden_channels, hidden_channels),
-            }, aggr='sum')
+            if edge_types is None:
+                conv = HeteroConv({
+                    ('raingauge', 'connects', 'raingauge'):
+                        GraphConv((-1, -1), hidden_channels),
+                }, aggr='sum')
+            else:
+                conv_dict = {}
+                for edge_type in edge_types:
+                    conv_dict[edge_type] = GraphConv((-1, -1), hidden_channels)
+                conv = HeteroConv(conv_dict, aggr='sum')
 
             self.convs.append(conv)
 
