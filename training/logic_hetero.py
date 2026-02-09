@@ -55,7 +55,7 @@ def train_epoch(
 
             x_dict = {}
             for nodetype in batch.node_types:
-                x_dict[nodetype] = batch[nodetype].x.to(device)
+                x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
@@ -122,9 +122,10 @@ def validate(
             x_masked = x.clone()
             x_masked[val_mask] = 0.0
 
-            x_dict = {
-                'raingauge': x_masked
-            }
+            x_dict = {}
+            for nodetype in batch.node_types:
+                x_dict[nodetype] = batch[nodetype].x
+            x_dict['raingauge'] = x_masked
 
             # Forward pass
             out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
@@ -188,9 +189,10 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
                 if hasattr(batch[edge_type], 'edge_attr')
             }
 
-            x_dict = {
-                'raingauge': x_masked
-            }
+            x_dict = {}
+            for nodetype in batch.node_types:
+                x_dict[nodetype] = batch[nodetype].x
+            x_dict['raingauge'] = x_masked
             # ----- Model forward -----
             out = model(x_dict, edge_index, edge_attr_dict)
 
