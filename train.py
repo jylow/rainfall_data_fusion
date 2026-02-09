@@ -38,12 +38,21 @@ start_year = config['dataset_parameters']['start_year']
 end_year = config['dataset_parameters']['end_year']
 raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = start_year, end = end_year, uptime_threshold=uptime_threshold)
 
+radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
 raingauge_df = raingauge_df.fillna(0)
 
 split_info = stratified_spatial_kfold_dual(
     raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count 
 )
+
+radar_cols = radar_df.columns
+raingauge_cols = raingauge_df.columns
+merged_df = radar_df.join(raingauge_df, on='timestamp', how='inner')
+
+merged_df
+radar_df = merged_df[radar_cols]
+raingauge_df = merged_df[raingauge_cols]
 
 gauge_graph_arr = []
 for i in range(fold_count):
@@ -59,7 +68,6 @@ for i in range(fold_count):
     GNNInductiveHetero(
       in_channels_dict = {
         "raingauge": 1,
-        "radar": 1
       },
       hidden_channels = hidden_channels,
       out_channels=out_channels, 
