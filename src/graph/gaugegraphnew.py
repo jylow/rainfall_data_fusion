@@ -43,9 +43,9 @@ class GaugeGraphNew():
         self.validation_heterodata = self.fill_heterodata("validation")
         self.test_heterodata = self.fill_heterodata("test")
 
-        self.train_heterodata = ToUndirected(self.train_heterodata)
-        self.validation_heterodata = ToUndirected(self.validation_heterodata)
-        self.test_heterodata = ToUndirected(self.test_heterodata)
+        self.train_heterodata = ToUndirected()(self.train_heterodata)
+        self.validation_heterodata = ToUndirected()(self.validation_heterodata)
+        self.test_heterodata = ToUndirected()(self.test_heterodata)
 
     def get_train_graph(self):
         return self.train_graph
