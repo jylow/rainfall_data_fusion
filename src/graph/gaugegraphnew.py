@@ -129,8 +129,11 @@ class GaugeGraphNew():
 
     def fill_heterodata(self, graph: str) -> HeteroData:
         heterodata = HeteroData()
-        heterodata['raingauge'].x = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
-        heterodata['raingauge'].y = torch.tensor(self.raingauge_df.values.T, dtype=torch.float32).unsqueeze(-1)
+        rainfall_values = torch.tensor(self.raingauge_df.fillna(0).values.T, dtype=torch.float32)
+        rainfall_validity = torch.tensor(self.raingauge_df.notna().astype(int).values.T, dtype=torch.int16)
+        rainfall_features = torch.stack([rainfall_values, rainfall_validity], dim=2)
+        heterodata['raingauge'].x = rainfall_features
+        heterodata['raingauge'].y = rainfall_values.unsqueeze(-1)
 
         match graph:
             case "train":
@@ -164,7 +167,7 @@ class GaugeGraphNew():
         return heterodata
 
 
-    def add_heterodata(self, radar_heterodata: HeteroData, coords, knn=4):
+    def add_heterodata(self, radar_heterodata: HeteroData, coords, layer_name: str,knn=4):
         self.fused_train_heterodata = self.train_heterodata.clone()
         self.fused_validation_heterodata = self.validation_heterodata.clone()
         self.fused_test_heterodata = self.test_heterodata.clone()
@@ -198,21 +201,21 @@ class GaugeGraphNew():
         val_connecting_edges, val_connecting_edge_weight = self.connect_graphs(val_raingauge_coords, coords)
         test_connecting_edges, test_connecting_edge_weight = self.connect_graphs(test_raingauge_coords, coords)
 
-        self.fused_train_heterodata['raingauge', 'connects', 'radar'].edge_index = torch.tensor(train_connecting_edges).T
-        self.fused_validation_heterodata['raingauge', 'connects', 'radar'].edge_index = torch.tensor(val_connecting_edges).T
-        self.fused_test_heterodata['raingauge', 'connects', 'radar'].edge_index = torch.tensor(test_connecting_edges).T
+        self.fused_train_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(train_connecting_edges).T
+        self.fused_validation_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(val_connecting_edges).T
+        self.fused_test_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(test_connecting_edges).T
 
-        self.fused_train_heterodata['raingauge', 'connects', 'radar'].edge_attr = torch.tensor(train_connecting_edge_weight).T
-        self.fused_validation_heterodata['raingauge', 'connects', 'radar'].edge_attr = torch.tensor(val_connecting_edge_weight).T
-        self.fused_test_heterodata['raingauge', 'connects', 'radar'].edge_attr = torch.tensor(test_connecting_edge_weight).T
+        self.fused_train_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(train_connecting_edge_weight).T
+        self.fused_validation_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(val_connecting_edge_weight).T
+        self.fused_test_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(test_connecting_edge_weight).T
 
-        self.fused_train_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = torch.tensor(train_connecting_edges).T.flip(0)
-        self.fused_validation_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = torch.tensor(val_connecting_edges).T.flip(0)
-        self.fused_test_heterodata['radar', 'rev_connects', 'raingauge'].edge_index = torch.tensor(test_connecting_edges).T.flip(0)
+        self.fused_train_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(train_connecting_edges).T.flip(0)
+        self.fused_validation_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(val_connecting_edges).T.flip(0)
+        self.fused_test_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(test_connecting_edges).T.flip(0)
 
-        self.fused_train_heterodata['radar', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(train_connecting_edge_weight)
-        self.fused_validation_heterodata['radar', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(val_connecting_edge_weight)
-        self.fused_test_heterodata['radar', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(test_connecting_edge_weight)
+        self.fused_train_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(train_connecting_edge_weight)
+        self.fused_validation_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(val_connecting_edge_weight)
+        self.fused_test_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(test_connecting_edge_weight)
 
         return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 

@@ -51,7 +51,7 @@ def train_epoch(
         for node_pos in range(num_nodes):
             x_masked = x.clone()
             indices_to_mask = torch.arange(num_graphs, device=device) * x.shape[0] // num_graphs + node_pos
-            x_masked[indices_to_mask] = 0.0
+            x_masked[indices_to_mask, :] = 0
 
             x_dict = {}
             for nodetype in batch.node_types:
@@ -120,7 +120,7 @@ def validate(
             }
 
             x_masked = x.clone()
-            x_masked[val_mask] = 0.0
+            x_masked[val_mask, :] = 0.0
 
             x_dict = {}
             for nodetype in batch.node_types:
@@ -181,7 +181,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
 
             assert mask.shape[0] == x.shape[0], "Mask and x size mismatch"
             x_masked = x.clone()
-            x_masked[mask] = 0.0
+            x_masked[mask, :] = 0.0
 
             edge_attr_dict = {
                 edge_type: batch[edge_type].edge_attr

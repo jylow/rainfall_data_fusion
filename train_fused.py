@@ -59,7 +59,7 @@ for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
   radar_graph = RadarGraph(radar_df)
   radar_heterodata = radar_graph.get_radar_heterodata()
-  gauge_graph.add_heterodata(radar_heterodata=radar_heterodata, coords = radar_graph.grid_coords)
+  gauge_graph.add_heterodata(radar_heterodata=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar')
   gauge_graph_arr.append(gauge_graph)
 
 hidden_channels = 8
