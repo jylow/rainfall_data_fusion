@@ -243,7 +243,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     # ============================================================
     # === GLOBAL METRICS
     # ============================================================
-    timestep_rmse = np.mean(np.array(timestep_RMSE))
+    timestep_rmse = np.mean(np.sqrt(np.array(timestep_RMSE)))
     print(f"Timestep RMSE: {timestep_rmse}")
 
     # ============================================================

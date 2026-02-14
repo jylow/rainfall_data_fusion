@@ -43,7 +43,7 @@ radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', crop
 raingauge_df = raingauge_df.fillna(0)
 
 split_info = stratified_spatial_kfold_dual(
-    raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count 
+    raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count
 )
 
 radar_cols = radar_df.columns
@@ -70,11 +70,11 @@ for i in range(fold_count):
   model_arr.append(
     GNNInductiveHetero(
       in_channels_dict = {
-        "raingauge": 1,
+        "raingauge": 2,
         "radar": 1
       },
       hidden_channels = hidden_channels,
-      out_channels=out_channels, 
+      out_channels=out_channels,
       num_layers = num_layers,
       edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
     ).to(device=device)
@@ -98,7 +98,7 @@ for i in range(fold_count):
 
     test_loader = GeometricDataLoader(
     HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_test_heterodata()),
-    batch_size = batch_size, 
+    batch_size = batch_size,
     shuffle = False
     )
 
