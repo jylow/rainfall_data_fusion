@@ -242,7 +242,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     # ============================================================
     # === TIMESTEP METRICS
     # ============================================================
-    temp_df = next(iter(dataloader)).mask['raingauge']
+    temp_df = next(iter(dataloader))['raingauge']
     batch_count = temp_df.ptr.shape[0] - 1
     test_stations = temp_df.mask.sum()
     test_station_count = test_stations // batch_count
