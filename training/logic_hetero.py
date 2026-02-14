@@ -165,6 +165,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     all_targets = []
     all_station_ids = []   # <-- FIXED: collect all station IDs here
     epoch_losses = []
+    timestep_RMSE = []
 
     test_bar = tqdm.tqdm(dataloader, desc="Testing")
 
@@ -199,6 +200,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
             # ----- Compute test loss -----
             loss = F.mse_loss(out['raingauge'][mask], y[mask])
             epoch_losses.append(loss.item())
+            timestep_RMSE.append(loss.item())
 
             # ----- Collect outputs -----
             all_preds.append(out['raingauge'][mask].detach().cpu())
@@ -239,6 +241,12 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     print(f"Final Test RMSE: {rmse}")
 
     # ============================================================
+    # === GLOBAL METRICS
+    # ============================================================
+    timestep_rmse = np.mean(np.array(timestep_RMSE))
+    print(f"Timestep RMSE: {timestep_rmse}")
+
+    # ============================================================
     # === GLOBAL SCATTER
     # ============================================================
     plt.figure(figsize=(8, 8))
@@ -249,7 +257,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     plt.ylabel("Predicted")
     plt.title("Test Set Performance")
     plt.grid(True)
-    text = f"Pearson r = {pearson_r:.3f}\nRMSE = {rmse:.3f}"
+    text = f"Pearson r = {pearson_r:.3f}\nRMSE = {rmse:.3f} \n TimestepRMSE = {timestep_rmse:.3f}"
     plt.text( 0.05, 0.95, text, transform=plt.gca().transAxes, verticalalignment="top", bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"), )
     plt.savefig(f"experiments/{experiment_name}/test_scatter_plot_{fold}.png", dpi=300)
     plt.close()
