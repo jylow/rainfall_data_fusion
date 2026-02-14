@@ -26,8 +26,8 @@ def main():
     start_year = config['dataset_parameters']['start_year']
     end_year = config['dataset_parameters']['end_year']
     raingauge_df, raingauge_mappings_df = load_raingauge_dataset(start=start_year, end=end_year, uptime_threshold=uptime_threshold)
-    raingauge_df = raingauge_df.resample('15min').first() #resamples df to 15 mins
-    raingauge_mappings = {k:v for k, v in raingauge_mappings_df.items() if k in raingauge_mappings_df.keys()}
+    raingauge_df = raingauge_df.resample('15min').first() #resamples df to 15 minsA
+    raingauge_mappings = {sid: (row['latitude'], row['longitude']) for sid, row in raingauge_mappings_df.set_index("id").iterrows()}
 
     radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
@@ -37,7 +37,8 @@ def main():
     raingauge_df = merged_df[raingauge_columns]
 
     print(raingauge_df.shape)
-    print(raingauge_mappings)
+    print("DEBUG")
+    print(raingauge_mappings.keys())
     #2. Get stratified training split
     split_info = stratified_spatial_kfold_dual(
         raingauge_mappings_df, seed=123, plot=False, n_splits=fold_count
