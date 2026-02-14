@@ -200,7 +200,6 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
             # ----- Compute test loss -----
             loss = F.mse_loss(out['raingauge'][mask], y[mask])
             epoch_losses.append(loss.item())
-            timestep_RMSE.append(loss.item())
 
             # ----- Collect outputs -----
             all_preds.append(out['raingauge'][mask].detach().cpu())
@@ -216,7 +215,7 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     # ============================================================
     all_preds = torch.cat(all_preds, dim=0)
     all_targets = torch.cat(all_targets, dim=0)
-    all_station_ids = torch.cat(all_station_ids, dim=0)   # <-- FIXED
+    all_station_ids = torch.cat(all_station_ids, dim=0)
 
     print("Final aggregated prediction shape:", all_preds.shape)
     print("Final aggregated target shape:", all_targets.shape)
@@ -241,9 +240,13 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     print(f"Final Test RMSE: {rmse}")
 
     # ============================================================
-    # === GLOBAL METRICS
+    # === TIMESTEP METRICS
     # ============================================================
-    timestep_rmse = np.mean(np.sqrt(np.array(timestep_RMSE)))
+    test_station_count = next(iter(dataloader)).mask.sum()
+    timestep_preds = all_preds.reshape(-1, test_station_count)
+    timestep_targets = all_targets.reshape(-1, test_station_count)
+    per_timestep_RMSE = torch.sqrt(((timestep_preds - timestep_targets)**2).mean(dim=1))
+    timestep_rmse = per_timestep_RMSE.mean().item()
     print(f"Timestep RMSE: {timestep_rmse}")
 
     # ============================================================

@@ -40,7 +40,7 @@ raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = sta
 
 radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
-raingauge_df = raingauge_df.fillna(0)
+#raingauge_df = raingauge_df.fillna(0)
 
 split_info = stratified_spatial_kfold_dual(
     raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count
@@ -64,7 +64,7 @@ for i in range(fold_count):
 
 hidden_channels = 8
 out_channels = 1
-num_layers = 8
+num_layers = 3
 model_arr = []
 for i in range(fold_count):
   model_arr.append(
