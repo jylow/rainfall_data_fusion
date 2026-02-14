@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from src.raingauge.utils import load_raingauge_dataset, get_station_coordinate_mappings, filter_uptime
 from src.sampling.main import stratified_spatial_kfold_dual
+from src.radar.utils import load_radar_dataset
 
 from tqdm import tqdm
 
@@ -21,19 +22,27 @@ def main():
     with open(config_file) as f:
         config = yaml.safe_load(f)
 
-    raingauge_df = load_raingauge_dataset(f'database/{config['dataset_parameters']['raingauge_file']}')
-    raingauge_mappings = get_station_coordinate_mappings(start = 2021, end = 2025)
-    filtered_stations = filter_uptime(raingauge_df, uptime_threshold = 0.9)
-    raingauge_df = raingauge_df[filtered_stations.keys()]
+    uptime_threshold = config['filters']['uptime_threshold']
+    start_year = config['dataset_parameters']['start_year']
+    end_year = config['dataset_parameters']['end_year']
+    raingauge_df, raingauge_mappings_df = load_raingauge_dataset(start=start_year, end=end_year, uptime_threshold=uptime_threshold)
     raingauge_df = raingauge_df.resample('15min').first() #resamples df to 15 mins
-    raingauge_mappings = {k:v for k, v in raingauge_mappings.items() if k in raingauge_df.keys()}
+    raingauge_mappings = {k:v for k, v in raingauge_mappings_df.items() if k in raingauge_mappings_df.keys()}
 
+    radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
+
+    radar_columns = radar_df.columns
+    raingauge_columns = raingauge_df.columns
+    merged_df = radar_df.merge(raingauge_df, on="timestamp", how='left')
+    raingauge_df = merged_df[raingauge_columns]
+
+    print(raingauge_df.shape)
+    print(raingauge_mappings)
     #2. Get stratified training split
     split_info = stratified_spatial_kfold_dual(
-        raingauge_mappings, seed=123, plot=False, n_splits=fold_count
+        raingauge_mappings_df, seed=123, plot=False, n_splits=fold_count
     )
 
-    print(raingauge_df.head(10))
     #3. Run the IDW for x folds
     for fold in range(fold_count):
         training_gauges = split_info[fold]['statistical']['train']
