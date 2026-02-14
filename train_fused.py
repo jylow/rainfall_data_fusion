@@ -128,7 +128,7 @@ def train_fold(model, train_loader, val_loader, fold, device="cpu"):
         print(f"-----EPOCH: {i + 1}-----")
 
         # CHECK 2: Print weight before training
-        weight_before = first_param.data.clone()
+        #weight_before = first_param.data.clone()
 
         train_loss = train_epoch(
             model,
@@ -141,9 +141,9 @@ def train_fold(model, train_loader, val_loader, fold, device="cpu"):
         print(train_loss)
 
         # CHECK 3: Print weight after training
-        weight_after = first_param.data
-        weight_change = (weight_after - weight_before).abs().mean().item()
-        print(f"Weight change: {weight_change:.20f}")
+        #weight_after = first_param.data
+        #weight_change = (weight_after - weight_before).abs().mean().item()
+        #print(f"Weight change: {weight_change:.20f}")
 
         validation_loss = validate(model, val_loader, device)
         training_loss_arr.append(train_loss)
