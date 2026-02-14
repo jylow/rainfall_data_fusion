@@ -17,7 +17,7 @@ def main():
     3. Use the statistics split to run IDW
     '''
     #1. Load data
-    fold_count = 1
+    fold_count = 5
     config_file = 'config.yaml'
     with open(config_file) as f:
         config = yaml.safe_load(f)
@@ -55,6 +55,7 @@ def main():
                           training_stations=training_gauges,
                           test_stations=test_gauges,
                           power = 2,
+                          fold=fold,
                           n_nearest=10,
                           regression_plot=True
                           )

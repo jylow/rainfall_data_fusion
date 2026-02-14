@@ -242,7 +242,10 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     # ============================================================
     # === TIMESTEP METRICS
     # ============================================================
-    test_station_count = next(iter(dataloader)).mask.sum()
+    temp_df = next(iter(dataloader)).mask['raingauge']
+    batch_count = temp_df.ptr.shape[0] - 1
+    test_stations = temp_df.mask.sum()
+    test_station_count = test_stations // batch_count
     timestep_preds = all_preds.reshape(-1, test_station_count)
     timestep_targets = all_targets.reshape(-1, test_station_count)
     per_timestep_RMSE = torch.sqrt(((timestep_preds - timestep_targets)**2).mean(dim=1))
