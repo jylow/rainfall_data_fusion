@@ -22,10 +22,10 @@ country_info:
   name: 'Singapore'
   country_bounds: {"left": 103.6, "right": 104.1, "top": 1.5, "bottom": 1.188}
 
-filters: 
+filters:
   uptime_threshold: 0.9
 
 training_params:
-  fold_count: 1
+  fold_count: 5
   seed: 123
   batch_size: 1024

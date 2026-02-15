@@ -46,8 +46,8 @@ def main():
 
     #3. Run the IDW for x folds
     for fold in range(fold_count):
-        training_gauges = split_info[fold]['statistical']['train']
-        test_gauges = split_info[fold]['statistical']['test']
+        training_gauges = split_info[fold]['ml']['train']
+        test_gauges = split_info[fold]['ml']['test']
 
         # Run idw
         run_IDW_benchmark(raingauge_data=raingauge_df,
