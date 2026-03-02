@@ -57,6 +57,7 @@ def train_epoch(
             for nodetype in batch.node_types:
                 x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
+            
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
             # Compute loss ONLY on trainable nodes

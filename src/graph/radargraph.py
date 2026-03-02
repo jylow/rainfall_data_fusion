@@ -25,7 +25,8 @@ class RadarGraph():
         self.y_coords = np.arange(self.bounds.top - 0.005, self.bounds.bottom, -0.01) # rows
 
         x_grid, y_grid = np.meshgrid(self.x_coords, self.y_coords)
-        self.grid_coords = np.column_stack((x_grid.flatten(), y_grid.flatten()))
+        self.grid_coords = pd.DataFrame(np.column_stack((x_grid.flatten(), y_grid.flatten())),
+                                        columns=['longitude', 'latitude'])
         self.graph = self.build_graph()
         self.generate_heterodata()
 

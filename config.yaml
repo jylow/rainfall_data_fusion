@@ -29,3 +29,5 @@ training_params:
   fold_count: 5
   seed: 123
   batch_size: 1024
+
+datasources: ['raingauge', 'radar', 'cml'] #Can accept raingauge, radar and cml

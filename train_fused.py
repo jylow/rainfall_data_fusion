@@ -5,6 +5,7 @@ import os
 import time
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from datetime import datetime
 from torch_geometric.data import HeteroData
@@ -18,7 +19,9 @@ from src.raingauge.utils import (
   load_raingauge_dataset
 )
 from src.radar.utils import load_radar_dataset
+from src.cml.utils import load_cml_dataset
 from training.logic_hetero import train_epoch, validate, test_model
+from src.graph.cmlgraph import CMLGraph
 from src.graph.gaugegraph import GaugeGraph
 from src.graph.radargraph import RadarGraph
 from src.graph.gaugegraphnew import GaugeGraphNew, HeterogeneousWeatherGraphDatasetInductive
@@ -28,6 +31,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 config = read_config('config.yaml')
 batch_size = config['training_params']['batch_size']
 fold_count = config['training_params']['fold_count']
+datasources = config['datasources']
 
 experiment_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_new"
 os.makedirs(f"experiments/{experiment_name}", exist_ok=True)
@@ -40,7 +44,6 @@ raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = sta
 
 radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
-#raingauge_df = raingauge_df.fillna(0)
 
 split_info = stratified_spatial_kfold_dual(
     raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count
@@ -48,20 +51,33 @@ split_info = stratified_spatial_kfold_dual(
 
 radar_cols = radar_df.columns
 raingauge_cols = raingauge_df.columns
-merged_df = radar_df.join(raingauge_df, on='timestamp', how='inner')
+merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
 
-merged_df
-radar_df = merged_df[radar_cols]
+if 'cml' in datasources:
+    cml_df, cml_coordinates_df = load_cml_dataset('CML_data_Feb2025-April2025.nc')
+    cml_cols = cml_df.columns
+    merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
+    cml_df = merged_df[cml_cols]
+
 raingauge_df = merged_df[raingauge_cols]
+radar_df = merged_df[radar_cols]
+raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], axis=1).drop_duplicates().reset_index()
+cml_df = cml_df.drop_duplicates()
+radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
+
 
 gauge_graph_arr = []
 for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
   radar_graph = RadarGraph(radar_df)
+  cml_graph = CMLGraph(cml_df, cml_coordinates_df)
   radar_heterodata = radar_graph.get_radar_heterodata()
-  gauge_graph.add_heterodata(radar_heterodata=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar')
+  cml_heterodata = cml_graph.get_heterodata()
+  gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar')
+  gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml')
   gauge_graph_arr.append(gauge_graph)
 
+cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
 hidden_channels = 8
 out_channels = 1
 num_layers = 3
@@ -71,7 +87,8 @@ for i in range(fold_count):
     GNNInductiveHetero(
       in_channels_dict = {
         "raingauge": 2,
-        "radar": 1
+        "radar": 1,
+        "cml": cml_features
       },
       hidden_channels = hidden_channels,
       out_channels=out_channels,
