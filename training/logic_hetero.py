@@ -57,7 +57,17 @@ def train_epoch(
             for nodetype in batch.node_types:
                 x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
-            
+            def check_nan(data_dict, name):
+                for key, tensor in data_dict.items():
+                    if torch.isnan(tensor).any():
+                        print(f"❌ Found NaN in {name} -> {key}")
+                    if torch.isinf(tensor).any():
+                        print(f"❌ Found Inf in {name} -> {key}")
+
+            check_nan(x_dict, "Node Features (x_dict)")
+            check_nan(edge_index_dict, "Edge Indices")
+            check_nan(edge_attr_dict, "Edge Attributes")
+
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
             # Compute loss ONLY on trainable nodes
@@ -69,6 +79,7 @@ def train_epoch(
         if scheduler is not None:
             scheduler.step()
         batch_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
 
         epoch_losses.append(batch_loss.item())

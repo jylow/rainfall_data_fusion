@@ -10,7 +10,7 @@ import pandas as pd
 from datetime import datetime
 from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader as GeometricDataLoader
-from torch_geometric.transforms import ToUndirected
+from torch_geometric.transforms import ToUndirected, NormalizeFeatures
 
 from src.performance_logger import PerformanceLogger
 from models.gnn import GNNInductiveHetero
@@ -25,6 +25,7 @@ from src.graph.cmlgraph import CMLGraph
 from src.graph.gaugegraph import GaugeGraph
 from src.graph.radargraph import RadarGraph
 from src.graph.gaugegraphnew import GaugeGraphNew, HeterogeneousWeatherGraphDatasetInductive
+
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -54,7 +55,8 @@ raingauge_cols = raingauge_df.columns
 merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
 
 if 'cml' in datasources:
-    cml_df, cml_coordinates_df = load_cml_dataset('CML_data_Feb2025-April2025.nc')
+    cml_df, cml_coordinates_df = load_cml_dataset('cml_data_Feb2025-April2025.nc')
+    cml_df.dropna(axis=0, how='any')
     cml_cols = cml_df.columns
     merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
     cml_df = merged_df[cml_cols]
@@ -65,6 +67,7 @@ raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], ax
 cml_df = cml_df.drop_duplicates()
 radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
 
+print(radar_df.shape)
 
 gauge_graph_arr = []
 for i in range(fold_count):
@@ -78,9 +81,10 @@ for i in range(fold_count):
   gauge_graph_arr.append(gauge_graph)
 
 cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
+print(cml_features)
 hidden_channels = 8
 out_channels = 1
-num_layers = 3
+num_layers = 5
 model_arr = []
 for i in range(fold_count):
   model_arr.append(
@@ -100,21 +104,22 @@ for i in range(fold_count):
 train_loader_arr = []
 val_loader_arr = []
 test_loader_arr = []
+normalize = NormalizeFeatures()
 for i in range(fold_count):
     train_loader = GeometricDataLoader(
-    HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_train_heterodata()), #Need to convert to timestep wise data
+    HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_train_heterodata())), #Need to convert to timestep wise data
     batch_size=batch_size,
     shuffle= False,
     )
 
     val_loader = GeometricDataLoader(
-    HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_validation_heterodata()),
+    HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_validation_heterodata())),
     batch_size=batch_size,
     shuffle=False,
     )
 
     test_loader = GeometricDataLoader(
-    HeterogeneousWeatherGraphDatasetInductive(gauge_graph_arr[i].get_test_heterodata()),
+    HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_test_heterodata())),
     batch_size = batch_size,
     shuffle = False
     )
@@ -125,6 +130,7 @@ for i in range(fold_count):
 
 def train_fold(model, train_loader, val_loader, fold, device="cpu"):
     # CHECK 1: Print initial weights
+    torch.autograd.set_detect_anomaly(True)
     print("Training")
     print(f"Device type: {device}")
     first_param = next(model.parameters())
@@ -137,7 +143,7 @@ def train_fold(model, train_loader, val_loader, fold, device="cpu"):
     mini = 1000
     stopping_condition = 5
     epochs = 0
-    total_epochs = 10
+    total_epochs = 100
     print(f"-----FOLD: {fold}-----")
     training_start = time.time()
     for i in range(total_epochs):

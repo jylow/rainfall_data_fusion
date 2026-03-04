@@ -37,13 +37,13 @@ class CMLGraph():
           CML_G.add_edge(idx, idx + 1, weight=row['length'])
 
         return CML_G
-    
+
     def prepare_tensor(self):
         '''
         Docstring for prepare_tensor
 
         Returns tensor of shape [nodes, timestamps, features]
-        
+
         :param self: Description
         '''
         encoded_df = pd.get_dummies(self.df, columns=['polarization'])
@@ -51,22 +51,23 @@ class CMLGraph():
         columns_to_keep = list(set(encoded_df.columns) - set(columns_to_remove))
 
         formatted_cml_df = encoded_df[columns_to_keep].pivot_table(
-            index="timestamp", columns=["link_id","station"] 
+            index="timestamp", columns=["link_id","station"]
         )
         formatted_cml_df = formatted_cml_df.reorder_levels(["link_id", "station", None], axis=1).sort_index(axis=1)
         formatted_cml_df = formatted_cml_df[self.coordinates_df['link_id']]
         station_count = self.df['link_id'].unique().shape[0] * 2
         formatted_cml_tensor = torch.tensor(formatted_cml_df.values, dtype=torch.float32)
+        formatted_cml_tensor = torch.nan_to_num(formatted_cml_tensor, nan=0.0)
         formatted_cml_tensor = formatted_cml_tensor.reshape(formatted_cml_df.shape[0], station_count, -1)
         formatted_cml_tensor = formatted_cml_tensor.permute(1, 0, 2)
         self.datatensor = formatted_cml_tensor
-        
+
         return formatted_cml_tensor
 
 
     def get_heterodata(self) -> HeteroData:
         return self.heterodata
-    
+
     def generate_heterodata(self):
         #Convert data in dataframe to tensor
         datatensor = self.datatensor
