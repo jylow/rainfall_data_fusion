@@ -3,7 +3,6 @@
     database_folder: 'database',
     start_year: 2024,
     end_year: 2025,
-    radar_folder: 'sg_radar_data_cropped',
     cml_file: '',
     train_size: 0.7,
     test_size: 0.1,      #test set size
@@ -41,7 +40,7 @@
   datasources: ['raingauge', 'radar', 'cml'],
 
   model: {
-    hidden_channels: 8,
+    hidden_channels: 32,
     num_layers: 5
   }
 }

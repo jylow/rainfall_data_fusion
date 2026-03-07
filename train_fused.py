@@ -16,7 +16,7 @@ from src.utils import read_config
 from src.raingauge.utils import (
   load_raingauge_dataset
 )
-from src.radar.utils import load_radar_dataset
+from src.radar.utils import load_radar_dataset, load_processed_dataset
 from src.cml.utils import load_cml_dataset
 from training.logic_hetero import train_epoch, validate, test_model
 from src.graph.cmlgraph import CMLGraph
@@ -43,7 +43,8 @@ uptime_threshold = config['filters']['uptime_threshold']
 start_year = config['dataset_parameters']['start_year']
 end_year = config['dataset_parameters']['end_year']
 raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = start_year, end = end_year, uptime_threshold=uptime_threshold)
-radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
+radar_df = load_processed_dataset("database/processed_radar_dataset.pkl")
+#radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
 
 # 4. INNER JOIN tables based on timestamp
@@ -52,8 +53,8 @@ raingauge_cols = raingauge_df.columns
 merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
 
 if 'cml' in datasources:
-    cml_df, cml_coordinates_df = load_cml_dataset('cml_data_Feb2025-April2025.nc')
-    cml_df.dropna(axis=0, how='any')
+    cml_df, cml_coordinates_df = load_cml_dataset(config['dataset_parameters']['cml_folder'])
+    cml_df.fillna(0)
     cml_cols = cml_df.columns
     merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
     cml_df = merged_df[cml_cols]
@@ -66,6 +67,9 @@ radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
 if 'cml' in datasources:
     cml_df = cml_df.drop_duplicates()
 
+print(raingauge_df.shape)
+print(radar_df.shape)
+print(cml_df.shape)
 
 # 5. Stratified sampling
 split_info = stratified_spatial_kfold_dual(
@@ -86,6 +90,7 @@ for i in range(fold_count):
     gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml')
   gauge_graph_arr.append(gauge_graph)
 
+print(gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape)
 
 # 7. Initialise HGNN model
 cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]

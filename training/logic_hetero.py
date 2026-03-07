@@ -71,6 +71,8 @@ def train_epoch(
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
             # Compute loss ONLY on trainable nodes
+            #loss = F.huber_loss(out['raingauge'][indices_to_mask], y[indices_to_mask], delta = 10.0)
+            #loss = F.weighted_mse(out['raingauge'][indices_to_mask], y[indices_to_mask])
             loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
             batch_loss += loss
 
@@ -142,7 +144,8 @@ def validate(
             # Forward pass
             out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
 
-            loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
+            loss = F.huber_loss(out['raingauge'][val_mask], y[val_mask], delta=10.0)
+            #loss = F.weighted_mse(out['raingauge'][val_mask], y[val_mask])
             epoch_losses.append(loss.item())
 
             # Store predictions and targets for metric computation
@@ -320,4 +323,13 @@ def test_model(model, mapping_df, dataloader, device, fold=0, experiment_name= "
     print(f"Saved per-station plots in {save_dir}")
 
     return rmse
+
+
+def weighted_mse(pred, target, alpha=2.0):
+    """
+    Penalizes underestimates on large actuals more heavily.
+    alpha controls how aggressively large values are upweighted.
+    """
+    weights = 1 + torch.log1p(target)  # larger actuals = higher weight
+    return (weights * (pred - target) ** 2).mean()
 
