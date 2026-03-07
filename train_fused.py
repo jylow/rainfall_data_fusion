@@ -4,13 +4,11 @@ import torch
 import os
 import time
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 from datetime import datetime
-from torch_geometric.data import HeteroData
 from torch_geometric.loader import DataLoader as GeometricDataLoader
-from torch_geometric.transforms import ToUndirected, NormalizeFeatures
+from torch_geometric.transforms import NormalizeFeatures
 
 from src.performance_logger import PerformanceLogger
 from models.gnn import GNNInductiveHetero
@@ -22,34 +20,33 @@ from src.radar.utils import load_radar_dataset
 from src.cml.utils import load_cml_dataset
 from training.logic_hetero import train_epoch, validate, test_model
 from src.graph.cmlgraph import CMLGraph
-from src.graph.gaugegraph import GaugeGraph
 from src.graph.radargraph import RadarGraph
 from src.graph.gaugegraphnew import GaugeGraphNew, HeterogeneousWeatherGraphDatasetInductive
 
 
-
+# 1. Load the config file
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 config = read_config('config.yaml')
 batch_size = config['training_params']['batch_size']
 fold_count = config['training_params']['fold_count']
 datasources = config['datasources']
 
+
+# 2. Set up experiment folder
 experiment_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_new"
 os.makedirs(f"experiments/{experiment_name}", exist_ok=True)
 perf = PerformanceLogger(f"experiments/{experiment_name}/training_log.jsonl")
 
+
+# 3. Load data
 uptime_threshold = config['filters']['uptime_threshold']
 start_year = config['dataset_parameters']['start_year']
 end_year = config['dataset_parameters']['end_year']
 raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = start_year, end = end_year, uptime_threshold=uptime_threshold)
-
 radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 
 
-split_info = stratified_spatial_kfold_dual(
-    raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count
-)
-
+# 4. INNER JOIN tables based on timestamp
 radar_cols = radar_df.columns
 raingauge_cols = raingauge_df.columns
 merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
@@ -64,27 +61,37 @@ if 'cml' in datasources:
 raingauge_df = merged_df[raingauge_cols]
 radar_df = merged_df[radar_cols]
 raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], axis=1).drop_duplicates().reset_index()
-cml_df = cml_df.drop_duplicates()
 radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
 
-print(radar_df.shape)
+if 'cml' in datasources:
+    cml_df = cml_df.drop_duplicates()
 
+
+# 5. Stratified sampling
+split_info = stratified_spatial_kfold_dual(
+    raingauge_station_mappings_df, seed=123, plot=False, n_splits = fold_count
+)
+
+
+# 6. Build graphs
 gauge_graph_arr = []
 for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
   radar_graph = RadarGraph(radar_df)
-  cml_graph = CMLGraph(cml_df, cml_coordinates_df)
   radar_heterodata = radar_graph.get_radar_heterodata()
-  cml_heterodata = cml_graph.get_heterodata()
   gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar')
-  gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml')
+  if 'cml' in datasources:
+    cml_graph = CMLGraph(cml_df, cml_coordinates_df)
+    cml_heterodata = cml_graph.get_heterodata()
+    gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml')
   gauge_graph_arr.append(gauge_graph)
 
+
+# 7. Initialise HGNN model
 cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
-print(cml_features)
-hidden_channels = 8
+hidden_channels = config['model']['hidden_channels']
 out_channels = 1
-num_layers = 5
+num_layers = config['model']['num_layers']
 model_arr = []
 for i in range(fold_count):
   model_arr.append(
@@ -101,6 +108,7 @@ for i in range(fold_count):
     ).to(device=device)
   )
 
+#8. Batch the data
 train_loader_arr = []
 val_loader_arr = []
 test_loader_arr = []
@@ -128,6 +136,8 @@ for i in range(fold_count):
     val_loader_arr.append(val_loader)
     test_loader_arr.append(test_loader)
 
+
+
 def train_fold(model, train_loader, val_loader, fold, device="cpu"):
     # CHECK 1: Print initial weights
     torch.autograd.set_detect_anomaly(True)
@@ -141,9 +151,9 @@ def train_fold(model, train_loader, val_loader, fold, device="cpu"):
     validation_loss_arr = []
     early = 0
     mini = 1000
-    stopping_condition = 5
+    stopping_condition = config['training_params']['early_stop']
     epochs = 0
-    total_epochs = 100
+    total_epochs = config['training_params']['epochs']
     print(f"-----FOLD: {fold}-----")
     training_start = time.time()
     for i in range(total_epochs):

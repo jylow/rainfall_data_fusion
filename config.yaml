@@ -1,33 +1,47 @@
-# dataset creation parameters
-dataset_parameters:
-  database_folder: 'database'
-  start_year: 2024
-  end_year: 2025
-  radar_folder: 'sg_radar_data_cropped'
-  cml_file: ''
-  train_size: 0.7     #training set size
-  test_size: 0.1      #test set size
-  seed: 111           #seed for randomness in training/test split
-  geography_bounds: {
-    left: 103.6,
-    right: 104.1,
-    top: 1.5,
-    bottom: 1.188
+{
+  dataset_parameters : {
+    database_folder: 'database',
+    start_year: 2024,
+    end_year: 2025,
+    radar_folder: 'sg_radar_data_cropped',
+    cml_file: '',
+    train_size: 0.7,
+    test_size: 0.1,      #test set size
+    seed: 111,           #seed for randomness in training/test split
+    geography_bounds: {
+      left: 103.6,
+      right: 104.1,
+      top: 1.5,
+      bottom: 1.188
+    },
+    cml_folder: 'combined_microwave_link_data_2024_2025.nc',
+  },
+
+  visualisation: {
+    bounds: [0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20]
+  },
+
+  country_info: {
+    name: 'Singapore',
+    country_bounds: {"left": 103.6, "right": 104.1, "top": 1.5, "bottom": 1.188}
+  },
+
+  filters: {
+      uptime_threshold: 0.9
+  },
+
+  training_params: {
+      fold_count: 5,
+      seed: 123,
+      batch_size: 1024,
+      epochs: 100,
+      early_stop: 5,
+  },
+
+  datasources: ['raingauge', 'radar', 'cml'],
+
+  model: {
+    hidden_channels: 8,
+    num_layers: 5
   }
-
-visualisation:
-  bounds: [0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20]
-
-country_info:
-  name: 'Singapore'
-  country_bounds: {"left": 103.6, "right": 104.1, "top": 1.5, "bottom": 1.188}
-
-filters:
-  uptime_threshold: 0.9
-
-training_params:
-  fold_count: 5
-  seed: 123
-  batch_size: 1024
-
-datasources: ['raingauge', 'radar', 'cml'] #Can accept raingauge, radar and cml
+}
