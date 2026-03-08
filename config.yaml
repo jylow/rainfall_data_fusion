@@ -32,15 +32,20 @@
   training_params: {
       fold_count: 5,
       seed: 123,
-      batch_size: 1024,
+      batch_size: 256,
       epochs: 100,
       early_stop: 5,
   },
 
   datasources: ['raingauge', 'radar', 'cml'],
 
+  layer_connect: {
+    radar: 16,
+    cml: 7
+  },
+
   model: {
-    hidden_channels: 32,
+    hidden_channels: 64,
     num_layers: 5
   }
 }

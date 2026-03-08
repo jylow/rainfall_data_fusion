@@ -144,8 +144,9 @@ def validate(
             # Forward pass
             out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
 
-            loss = F.huber_loss(out['raingauge'][val_mask], y[val_mask], delta=10.0)
+            #loss = F.huber_loss(out['raingauge'][val_mask], y[val_mask], delta=10.0)
             #loss = F.weighted_mse(out['raingauge'][val_mask], y[val_mask])
+            loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
             epoch_losses.append(loss.item())
 
             # Store predictions and targets for metric computation

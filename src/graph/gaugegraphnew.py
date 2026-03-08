@@ -203,13 +203,13 @@ class GaugeGraphNew():
                                          self.mapping_df['latitude']))
 
         if layer_name == "cml":
-            train_connecting_edges, train_connecting_edge_weight = self.connect_cml_graph(train_raingauge_coords, coords)
-            val_connecting_edges, val_connecting_edge_weight = self.connect_cml_graph(val_raingauge_coords, coords)
-            test_connecting_edges, test_connecting_edge_weight = self.connect_cml_graph(test_raingauge_coords, coords)
+            train_connecting_edges, train_connecting_edge_weight = self.connect_cml_graph(train_raingauge_coords, coords, knn)
+            val_connecting_edges, val_connecting_edge_weight = self.connect_cml_graph(val_raingauge_coords, coords, knn)
+            test_connecting_edges, test_connecting_edge_weight = self.connect_cml_graph(test_raingauge_coords, coords, knn)
         else:
-            train_connecting_edges, train_connecting_edge_weight = self.connect_graphs(train_raingauge_coords, coords)
-            val_connecting_edges, val_connecting_edge_weight = self.connect_graphs(val_raingauge_coords, coords)
-            test_connecting_edges, test_connecting_edge_weight = self.connect_graphs(test_raingauge_coords, coords)
+            train_connecting_edges, train_connecting_edge_weight = self.connect_graphs(train_raingauge_coords, coords, knn)
+            val_connecting_edges, val_connecting_edge_weight = self.connect_graphs(val_raingauge_coords, coords, knn)
+            test_connecting_edges, test_connecting_edge_weight = self.connect_graphs(test_raingauge_coords, coords, knn)
 
 
 
@@ -231,7 +231,7 @@ class GaugeGraphNew():
 
         return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 
-    def connect_cml_graph(self, raingauge_coords, cml_coords: pd.DataFrame) -> tuple[list,list]:
+    def connect_cml_graph(self, raingauge_coords, cml_coords: pd.DataFrame, knn:int) -> tuple[list,list]:
         gauge_gdf = gpd.GeoDataFrame(
             geometry=[Point(lon, lat) for lon, lat
              in raingauge_coords],
@@ -260,7 +260,7 @@ class GaugeGraphNew():
 
 
         tree = STRtree(cml_gdf.geometry)
-        K = 5
+        K = knn
         edge_list = []
         weight_list = []
 
@@ -283,7 +283,7 @@ class GaugeGraphNew():
 
         return edge_list, weight_list
 
-    def connect_graphs(self, raingauge_coords, other_coords: pd.DataFrame, knn=9) -> tuple[list, list]:
+    def connect_graphs(self, raingauge_coords, other_coords: pd.DataFrame, knn=16) -> tuple[list, list]:
         edges = []
         A_coords = np.radians(np.array(raingauge_coords))
         B_coords = np.radians(np.array(list(zip(other_coords['longitude'], other_coords['latitude']))))

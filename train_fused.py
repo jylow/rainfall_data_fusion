@@ -83,11 +83,11 @@ for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
   radar_graph = RadarGraph(radar_df)
   radar_heterodata = radar_graph.get_radar_heterodata()
-  gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar')
+  gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar', knn=config['layer_connect']['radar'])
   if 'cml' in datasources:
     cml_graph = CMLGraph(cml_df, cml_coordinates_df)
     cml_heterodata = cml_graph.get_heterodata()
-    gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml')
+    gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml', knn=config['layer_connect']['cml'])
   gauge_graph_arr.append(gauge_graph)
 
 print(gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape)
