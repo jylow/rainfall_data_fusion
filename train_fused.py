@@ -52,20 +52,18 @@ radar_cols = radar_df.columns
 raingauge_cols = raingauge_df.columns
 merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
 
-if 'cml' in datasources:
-    cml_df, cml_coordinates_df = load_cml_dataset(config['dataset_parameters']['cml_folder'])
-    cml_df.fillna(0)
-    cml_cols = cml_df.columns
-    merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
-    cml_df = merged_df[cml_cols]
+cml_df, cml_coordinates_df = load_cml_dataset(config['dataset_parameters']['cml_folder'])
+cml_df.fillna(0)
+cml_cols = cml_df.columns
+merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
+cml_df = merged_df[cml_cols]
 
 raingauge_df = merged_df[raingauge_cols]
 radar_df = merged_df[radar_cols]
 raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], axis=1).drop_duplicates().reset_index()
 radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
 
-if 'cml' in datasources:
-    cml_df = cml_df.drop_duplicates()
+cml_df = cml_df.drop_duplicates()
 
 print(raingauge_df.shape)
 print(radar_df.shape)
@@ -81,37 +79,52 @@ split_info = stratified_spatial_kfold_dual(
 gauge_graph_arr = []
 for i in range(fold_count):
   gauge_graph = GaugeGraphNew(raingauge_df, raingauge_station_mappings_df, split_info = split_info[i], knn=5)
-  radar_graph = RadarGraph(radar_df)
-  radar_heterodata = radar_graph.get_radar_heterodata()
-  gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar', knn=config['layer_connect']['radar'])
+  if 'radar' in datasources:
+      radar_graph = RadarGraph(radar_df)
+      radar_heterodata = radar_graph.get_radar_heterodata()
+      gauge_graph.add_heterodata(heterodata_layer=radar_heterodata, coords = radar_graph.grid_coords, layer_name='radar', knn=config['layer_connect']['radar'])
   if 'cml' in datasources:
     cml_graph = CMLGraph(cml_df, cml_coordinates_df)
     cml_heterodata = cml_graph.get_heterodata()
     gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml', knn=config['layer_connect']['cml'])
   gauge_graph_arr.append(gauge_graph)
 
-print(gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape)
 
 # 7. Initialise HGNN model
-cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
+if 'cml' in datasources:
+    cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
 hidden_channels = config['model']['hidden_channels']
 out_channels = 1
 num_layers = config['model']['num_layers']
 model_arr = []
 for i in range(fold_count):
-  model_arr.append(
-    GNNInductiveHetero(
-      in_channels_dict = {
-        "raingauge": 2,
-        "radar": 1,
-        "cml": cml_features
-      },
-      hidden_channels = hidden_channels,
-      out_channels=out_channels,
-      num_layers = num_layers,
-      edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
-    ).to(device=device)
-  )
+  if 'cml' in datasources:
+      model_arr.append(
+        GNNInductiveHetero(
+          in_channels_dict = {
+            "raingauge": 2,
+            "radar": 1,
+            "cml": cml_features
+          },
+          hidden_channels = hidden_channels,
+          out_channels=out_channels,
+          num_layers = num_layers,
+          edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
+        ).to(device=device)
+      )
+  else:
+      model_arr.append(
+        GNNInductiveHetero(
+          in_channels_dict = {
+            "raingauge": 2,
+            "radar": 1,
+          },
+          hidden_channels = hidden_channels,
+          out_channels=out_channels,
+          num_layers = num_layers,
+          edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
+        ).to(device=device)
+      )
 
 #8. Batch the data
 train_loader_arr = []

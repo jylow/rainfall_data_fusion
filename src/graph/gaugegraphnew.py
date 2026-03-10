@@ -271,6 +271,8 @@ class GaugeGraphNew():
             top_k = distances.nsmallest(K)
 
             for cml_idx, dist in top_k.items():
+                if cml_idx % 2 == 1:
+                    cml_idx -= 1
                 row = cml_coords.iloc[cml_idx]
                 edge_list.append((gauge_idx, cml_idx))
                 edge_list.append((gauge_idx, cml_idx + 1))

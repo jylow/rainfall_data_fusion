@@ -37,15 +37,15 @@
       early_stop: 5,
   },
 
-  datasources: ['raingauge', 'radar', 'cml'],
+  datasources: ['radar', raingauge'],
 
   layer_connect: {
-    radar: 16,
-    cml: 7
+    radar: 9,
+    cml: 5
   },
 
   model: {
-    hidden_channels: 64,
+    hidden_channels: 32,
     num_layers: 5
   }
 }
