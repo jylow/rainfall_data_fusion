@@ -32,7 +32,7 @@
   training_params: {
       fold_count: 5,
       seed: 123,
-      batch_size: 256,
+      batch_size: 256, #hyper_param
       epochs: 100,
       early_stop: 5,
   },
@@ -40,12 +40,16 @@
   datasources: ['radar', raingauge'],
 
   layer_connect: {
-    radar: 9,
-    cml: 5
+    gauge_gauge: 5, #hyper_param
+    radar_gauge: 9, #hyper_param
+    cml_gauge: 5, #hyper_param
+    is_directed: True
   },
 
   model: {
-    hidden_channels: 32,
-    num_layers: 5
+    hidden_channels: 32, #hyper_param
+    num_layers: 5, #hyper_param
+    learning_rate: 0.005,
+    weight_decay: 1e-4,
   }
 }
