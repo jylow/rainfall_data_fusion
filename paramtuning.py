@@ -6,14 +6,11 @@ from train_fused import train_fused
 def objective(trial):
     config = read_config("config.yaml")
 
-    config["training_params"]["batch_size"] = trial.suggest_categorical(
-        "batch_size", [64, 128, 256, 512]
-    )
     config["layer_connect"]["gauge_gauge"] = trial.suggest_int(
         "gauge_gauge", 3, 10
     )
     config["layer_connect"]["radar_gauge"] = trial.suggest_int(
-        "radar_gauge", 5, 15
+        "radar_gauge", 5, 25
     )
     config["layer_connect"]["cml_gauge"] = trial.suggest_int(
         "cml_gauge", 3, 10
@@ -25,10 +22,10 @@ def objective(trial):
         "num_layers", 2, 8
     )
     config["model"]["learning_rate"] = trial.suggest_float(
-        "learning_rate", 1e-4, 1e-2, log=True
+        "learning_rate", 0.0001, 0.01, log=True
     )
     config["model"]["weight_decay"] = trial.suggest_float(
-        "weight_decay", 1e-5, 1e-1, log=True
+        "weight_decay", 0.000001, 0.1, log=True
     )
 
     # Returns multiple metrics
@@ -49,7 +46,7 @@ def objective(trial):
 study = optuna.create_study(
     directions=["minimize", "minimize", "maximize"],
     study_name="rain_gnn_multiobjective",
-    storage="sqlite:///optuna_multi.db",
+    storage="sqlite:///optuna_multi_all.db",
     load_if_exists=True,
     sampler=optuna.samplers.NSGAIISampler(seed=42),
 )

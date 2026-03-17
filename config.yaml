@@ -30,14 +30,14 @@
   },
 
   training_params: {
-      fold_count: 5,
+      fold_count: 2,
       seed: 123,
       batch_size: 256, #hyper_param
       epochs: 100,
       early_stop: 5,
   },
 
-  datasources: ['radar', raingauge'],
+  datasources: ['raingauge', 'radar', 'cml'],
 
   layer_connect: {
     gauge_gauge: 5, #hyper_param

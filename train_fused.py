@@ -110,7 +110,7 @@ def train_fused(config):
               hidden_channels = hidden_channels,
               out_channels=out_channels,
               num_layers = num_layers,
-              edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
+              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types
             ).to(device=device)
           )
       else:
@@ -123,7 +123,7 @@ def train_fused(config):
               hidden_channels = hidden_channels,
               out_channels=out_channels,
               num_layers = num_layers,
-              edge_types = gauge_graph_arr[i].fused_test_heterodata.edge_types
+              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types
             ).to(device=device)
           )
 
@@ -165,7 +165,7 @@ def train_fused(config):
         first_param = next(model.parameters())
         print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=config['model']['learning_rate'], weight_decay=config['model']['weight_decay'])
+        optimizer = torch.optim.Adam(model.parameters(), lr=(config['model']['learning_rate']), weight_decay=float(config['model']['weight_decay']))
         training_loss_arr = []
         validation_loss_arr = []
         early = 0
