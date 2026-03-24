@@ -98,12 +98,13 @@ def train_fused(config):
     out_channels = 1
     num_layers = config['model']['num_layers']
     model_arr = []
+    raingauge_features = 6 if config['dataset_parameters']['include_lpe'] else 2
     for i in range(fold_count):
       if 'cml' in datasources:
           model_arr.append(
             GNNInductiveHetero(
               in_channels_dict = {
-                "raingauge": 2,
+                "raingauge": raingauge_features,
                 "radar": 1,
                 "cml": cml_features
               },
@@ -117,7 +118,7 @@ def train_fused(config):
           model_arr.append(
             GNNInductiveHetero(
               in_channels_dict = {
-                "raingauge": 2,
+                "raingauge": raingauge_features,
                 "radar": 1,
               },
               hidden_channels = hidden_channels,

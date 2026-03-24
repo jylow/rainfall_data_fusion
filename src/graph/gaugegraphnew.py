@@ -6,8 +6,8 @@ import torch
 
 import geopandas as gpd
 from shapely import STRtree, LineString, Point
-from torch_geometric.data import HeteroData
-from torch_geometric.transforms import ToUndirected
+from torch_geometric.data import HeteroData, Data
+from torch_geometric.transforms import ToUndirected, AddLaplacianEigenvectorPE
 from torch.utils.data import Dataset
 from sklearn.neighbors import NearestNeighbors
 from typing import Literal
@@ -34,6 +34,7 @@ class GaugeGraphNew():
         self.fused_test_heterodata=None
         self.fused_train_heterodata=None
         self.fused_validation_heterodata=None
+        self.inverse_weighted=True
 
         self.train_mask, self.val_mask, self.test_mask = self.initialise_masks()
 
@@ -63,19 +64,19 @@ class GaugeGraphNew():
     def get_test_graph(self):
         return self.test_graph
 
-    def get_train_heterodata(self):
+    def get_train_heterodata(self, normalize = True):
         if self.fused_train_heterodata:
             return self.fused_train_heterodata
         else:
             return self.train_heterodata
 
-    def get_validation_heterodata(self):
+    def get_validation_heterodata(self, normalize = True):
         if self.fused_validation_heterodata:
             return self.fused_validation_heterodata
         else:
             return self.validation_heterodata
 
-    def get_test_heterodata(self):
+    def get_test_heterodata(self, normalize = True):
         if self.fused_test_heterodata:
             return self.fused_test_heterodata
         else:
@@ -112,7 +113,10 @@ class GaugeGraphNew():
             for j, neighbor_idx in enumerate(neighbors[1:]):
               dist = distances[i][j + 1]
 
-              G.add_edge(i, neighbor_idx, weight=dist)
+              if self.inverse_weighted:
+                  G.add_edge(i, neighbor_idx, weight=1/dist)
+              else:
+                  G.add_edge(i, neighbor_idx, weight=dist)
 
         return G
 
@@ -165,9 +169,27 @@ class GaugeGraphNew():
             ])
             weight = data['weight']
             edge_attr.append(weight)
+        max_attr = max(edge_attr)
+        edge_attr = [x / max_attr for x in edge_attr]
         heterodata['raingauge', 'connects', 'raingauge'].edge_index = torch.tensor(edge_index, dtype=int).T
         heterodata['raingauge', 'connects', 'raingauge'].edge_attr = torch.tensor(edge_attr, dtype=torch.float32)
         heterodata['raingauge'].num_nodes = torch.tensor(heterodata['raingauge'].x.shape[0], dtype=torch.int32)
+
+        #Fill laplacian
+        if config['dataset_parameters']['include_lpe']:
+            temp_graph = Data(
+                x=torch.zeros(heterodata['raingauge'].x.shape[0], 1),
+                edge_index=heterodata['raingauge', 'connects', 'raingauge'].edge_index,
+                num_nodes=heterodata['raingauge'].x.shape[0],
+            )
+            lpe_transform = AddLaplacianEigenvectorPE(k=4, attr_name='laplacian_pe')
+            temp_graph = lpe_transform(temp_graph)
+            lpe = temp_graph.laplacian_pe
+
+            timestamps = heterodata['raingauge'].x.shape[1]
+            lpe_expanded = lpe.unsqueeze(1).expand(-1, timestamps, -1)
+            heterodata['raingauge'].x = torch.cat([heterodata['raingauge'].x, lpe_expanded], dim=2)
+
         return heterodata
 
 
@@ -282,8 +304,14 @@ class GaugeGraphNew():
                 station_B = node_b_gdf.iloc[cml_idx]
                 weight_A = gauge_pt.distance(station_A) / 1000 #downscale
                 weight_B  = gauge_pt.distance(station_B) / 1000 #downscale
+                if self.inverse_weighted:
+                    weight_A = 1/weight_A
+                    weight_B = 1/weight_B
                 weight_list.append(float(weight_A.item()))
                 weight_list.append(float(weight_B.item()))
+
+        max_weight = max(weight_list)
+        weight_list = [x / max_weight for x in weight_list]
 
         return edge_list, weight_list
 
@@ -305,7 +333,14 @@ class GaugeGraphNew():
         for i in range(len(raingauge_coords)):
             for j in range(knn):
                 edge_list.append((i, indices[i, j]))
-                weight_list.append(distances[i, j])
+                if self.inverse_weighted:
+                    weight_list.append(distances[i, j])
+                else:
+                    weight_list.append(distances[i, j])
+
+        max_weight = max(weight_list)
+        weight_list = [x/max_weight for x in weight_list]
+
         return edge_list, weight_list
 
     def get_fused_heterodata(self):

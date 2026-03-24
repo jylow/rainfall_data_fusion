@@ -44,7 +44,8 @@ def objective(trial):
 
 
 study = optuna.create_study(
-    directions=["minimize", "minimize", "maximize"],
+    directions=["minimize"],
+    #directions=["minimize", "minimize", "maximize"],
     study_name="rain_gnn_multiobjective",
     storage="sqlite:///optuna_multi_all.db",
     load_if_exists=True,

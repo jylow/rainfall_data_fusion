@@ -14,6 +14,7 @@
       bottom: 1.188
     },
     cml_folder: 'combined_microwave_link_data_2024_2025.nc',
+    include_lpe: True,
   },
 
   visualisation: {
@@ -48,8 +49,8 @@
 
   model: {
     hidden_channels: 32, #hyper_param
-    num_layers: 5, #hyper_param
-    learning_rate: 0.005,
+    num_layers: 2, #hyper_param
+    learning_rate: 0.001,
     weight_decay: 1e-4,
   }
 }
