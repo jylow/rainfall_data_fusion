@@ -99,7 +99,7 @@ class GaugeGraphNew():
 
         #Build the graph
         G = nx.Graph()
-        filtered_mapping_df = self.mapping_df[mask]
+        filtered_mapping_df = self.mapping_df[mask].reset_index()
         coords = filtered_mapping_df[['longitude', 'latitude']].values
 
         ball_tree = NearestNeighbors(n_neighbors=self.knn+1, algorithm='ball_tree').fit(coords)
@@ -334,7 +334,7 @@ class GaugeGraphNew():
             for j in range(knn):
                 edge_list.append((i, indices[i, j]))
                 if self.inverse_weighted:
-                    weight_list.append(distances[i, j])
+                    weight_list.append(1/distances[i, j])
                 else:
                     weight_list.append(distances[i, j])
 
@@ -350,33 +350,29 @@ class GaugeGraphNew():
     def visualise_graph_split(self):
 
         fig, ax = plt.subplots(1, 3, figsize=(30, 10))
-        mappings = self.mapping_df.set_index('id')
-        train_df = mappings.loc[list(self.train_graph.nodes)]
-        val_df = mappings.loc[list(self.validation_graph.nodes)]
-        test_df = mappings.loc[list(self.test_graph.nodes)]
-        print(train_df.iloc[0])
 
-        train_pos = {node: (row['longitude'], row['latitude'])
-                 for node, row in train_df.iterrows()}
-        validation_pos = {node: (row['longitude'], row['latitude'])
-                for node, row in val_df.iterrows()}
-        test_pos = {node: (row['longitude'], row['latitude'])
-                    for node, row in test_df.iterrows()}
+        # Build DataFrames from masks with reset_index so positions match
+        # graph node labels (which are 0-based integers from enumerate in build_graph)
+        train_df = self.mapping_df[self.train_mask].reset_index(drop=True)
+        val_df = self.mapping_df[np.logical_or(self.train_mask, self.val_mask)].reset_index(drop=True)
+        test_df = self.mapping_df.reset_index(drop=True)
 
-        train_stations = train_df.index
-        val_stations = val_df.index
-        val_colors = []
+        train_pos = {i: (row['longitude'], row['latitude']) for i, row in train_df.iterrows()}
+        validation_pos = {i: (row['longitude'], row['latitude']) for i, row in val_df.iterrows()}
+        test_pos = {i: (row['longitude'], row['latitude']) for i, row in test_df.iterrows()}
+
+        train_ids = set(self.train_gauges)
+        val_ids = set(self.validation_gauges)
+
+        val_colors = [
+            'blue' if row['id'] in train_ids else 'green'
+            for _, row in val_df.iterrows()
+        ]
         test_colors = []
-        for node in val_df.index:
-            if node in train_stations:
-                val_colors.append("blue")
-            else:
-                val_colors.append("green")
-
-        for node in test_df.index:
-            if node in train_stations:
+        for _, row in test_df.iterrows():
+            if row['id'] in train_ids:
                 test_colors.append('blue')
-            elif node in val_stations:
+            elif row['id'] in val_ids:
                 test_colors.append('green')
             else:
                 test_colors.append('red')

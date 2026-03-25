@@ -9,7 +9,6 @@ import numpy as np
 
 from datetime import datetime
 from torch_geometric.loader import DataLoader as GeometricDataLoader
-from torch_geometric.transforms import NormalizeFeatures
 
 from src.performance_logger import PerformanceLogger
 from models.gnn import GNNInductiveHetero
@@ -54,7 +53,7 @@ def train_fused(config):
     merged_df = radar_df.merge(raingauge_df, on=['timestamp'], how='inner')
 
     cml_df, cml_coordinates_df = load_cml_dataset(config['dataset_parameters']['cml_folder'])
-    cml_df.fillna(0)
+    cml_df = cml_df.fillna(0)
     cml_cols = cml_df.columns
     merged_df = merged_df.merge(cml_df, on=['timestamp'], how='inner')
     cml_df = merged_df[cml_cols]
@@ -129,27 +128,50 @@ def train_fused(config):
           )
 
 #8. Batch the data
+    def compute_norm_stats(heterodata):
+        """Compute per-feature mean and std from one split's node features."""
+        stats = {}
+        for node_type in heterodata.node_types:
+            x = heterodata[node_type].x  # [N, T, F]
+            mean = x.mean(dim=(0, 1))
+            std = x.std(dim=(0, 1)).clamp(min=1e-8)
+            stats[node_type] = (mean, std)
+        return stats
+
+    def apply_norm(heterodata, stats):
+        """Apply precomputed stats to a heterodata object. Only touches .x, never .y."""
+        normed = heterodata.clone()
+        for node_type in heterodata.node_types:
+            if node_type in stats:
+                mean, std = stats[node_type]
+                normed[node_type].x = (heterodata[node_type].x - mean) / std
+        return normed
+
     train_loader_arr = []
     val_loader_arr = []
     test_loader_arr = []
-    normalize = NormalizeFeatures()
     for i in range(fold_count):
+        train_data = gauge_graph_arr[i].get_train_heterodata()
+        val_data   = gauge_graph_arr[i].get_validation_heterodata()
+        test_data  = gauge_graph_arr[i].get_test_heterodata()
+
+        # Compute stats from training split only, apply same stats to val and test
+        stats = compute_norm_stats(train_data)
+
         train_loader = GeometricDataLoader(
-        HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_train_heterodata())), #Need to convert to timestep wise data
-        batch_size=batch_size,
-        shuffle= False,
+            HeterogeneousWeatherGraphDatasetInductive(apply_norm(train_data, stats)),
+            batch_size=batch_size,
+            shuffle=False,
         )
-
         val_loader = GeometricDataLoader(
-        HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_validation_heterodata())),
-        batch_size=batch_size,
-        shuffle=False,
+            HeterogeneousWeatherGraphDatasetInductive(apply_norm(val_data, stats)),
+            batch_size=batch_size,
+            shuffle=False,
         )
-
         test_loader = GeometricDataLoader(
-        HeterogeneousWeatherGraphDatasetInductive(normalize(gauge_graph_arr[i].get_test_heterodata())),
-        batch_size = batch_size,
-        shuffle = False
+            HeterogeneousWeatherGraphDatasetInductive(apply_norm(test_data, stats)),
+            batch_size=batch_size,
+            shuffle=False,
         )
 
         train_loader_arr.append(train_loader)
@@ -160,7 +182,7 @@ def train_fused(config):
 
     def train_fold(model, train_loader, val_loader, fold, device="cpu"):
         # CHECK 1: Print initial weights
-        torch.autograd.set_detect_anomaly(True)
+        #torch.autograd.set_detect_anomaly(True)
         print("Training")
         print(f"Device type: {device}")
         first_param = next(model.parameters())

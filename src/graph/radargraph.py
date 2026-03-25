@@ -50,7 +50,7 @@ class RadarGraph():
             for col in range(len(self.x_coords)):
                 node_id = self.flattened_id(row, col)
                 neighbors = [
-                    (row-1, col-1), (row-1, col), (row-1, row+1),  # top row
+                    (row-1, col-1), (row-1, col), (row-1, col+1),  # top row
                     (row, col-1),             (row, col+1),    # left and right
                     (row+1, col-1), (row+1, col), (row+1, col+1)   # bottom row
                 ]
@@ -65,7 +65,8 @@ class RadarGraph():
     def generate_heterodata(self):
         #Convert data in dataframe to tensor
         stack_data = np.stack(self.data.tolist())
-        datatensor = torch.tensor(stack_data.T.reshape(stack_data.shape[1] * stack_data.shape[2], -1))
+        #datatensor = torch.tensor(stack_data.T.reshape(stack_data.shape[1] * stack_data.shape[2], -1))
+        datatensor = torch.tensor(stack_data.reshape(stack_data.shape[0], -1).T.copy(), dtype=torch.float32)
 
 
         self.heterodata = HeteroData()
