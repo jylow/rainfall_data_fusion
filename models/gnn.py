@@ -303,7 +303,7 @@ class GNNInductiveHetero(torch.nn.Module):
                 conv_dict = {}
                 for edge_type in edge_types:
                     conv_dict[edge_type] = GraphConv((-1, -1), hidden_channels)
-                conv = HeteroConv(conv_dict, aggr='sum')
+                conv = HeteroConv(conv_dict, aggr='mean')
 
             self.convs.append(conv)
 
@@ -332,7 +332,7 @@ class GNNInductiveHetero(torch.nn.Module):
 
         # Output prediction heads
         out_dict = {
-            'raingauge': self.lin(h_dict['raingauge']),
+            'raingauge': F.softplus(self.lin(h_dict['raingauge'])),
         }
 
         return out_dict
