@@ -59,7 +59,7 @@ class GaugeGraphNew():
         return self.validation_graph
 
     def get_validation_graph_mask(self):
-        return np.logical_or([self.train_mask, self.val_mask])
+        return np.logical_or(self.train_mask, self.val_mask)
 
     def get_test_graph(self):
         return self.test_graph
@@ -318,7 +318,7 @@ class GaugeGraphNew():
     def connect_graphs(self, raingauge_coords, other_coords: pd.DataFrame, knn=16) -> tuple[list, list]:
         edges = []
         A_coords = np.radians(np.array(raingauge_coords))
-        B_coords = np.radians(np.array(list(zip(other_coords['longitude'], other_coords['latitude']))))
+        B_coords = np.radians(np.array(list(zip(other_coords['latitude'], other_coords['longitude']))))
 
 
         # Use haversine metric

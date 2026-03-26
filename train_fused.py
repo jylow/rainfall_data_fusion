@@ -60,7 +60,7 @@ def train_fused(config):
 
     raingauge_df = merged_df[raingauge_cols]
     radar_df = merged_df[radar_cols]
-    raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], axis=1).drop_duplicates().reset_index()
+    raingauge_df = pd.concat([merged_df['timestamp'], merged_df[raingauge_cols]], axis=1).drop_duplicates().reset_index(drop=True)
     radar_df = radar_df.drop_duplicates(subset=['timestamp'], keep='first')
 
     cml_df = cml_df.drop_duplicates()
@@ -192,7 +192,7 @@ def train_fused(config):
         training_loss_arr = []
         validation_loss_arr = []
         early = 0
-        mini = 1000
+        mini = float('inf')
         stopping_condition = config['training_params']['early_stop']
         epochs = 0
         total_epochs = config['training_params']['epochs']
@@ -222,6 +222,10 @@ def train_fused(config):
             if mini >= validation_loss:
                 mini = validation_loss
                 early = 0
+                torch.save(
+                    model.state_dict(), f"experiments/{experiment_name}/weather_gnn_best_{fold}.pth"
+                )
+                print("✅ model weights saved to weather_gnn_best.pth")
             else:
                 early += 1
             epochs += 1
@@ -252,14 +256,15 @@ def train_fused(config):
         plt.savefig(f"experiments/{experiment_name}/train_loss_plot_{fold}.png", dpi=300)
         plt.close()
 
-        torch.save(
-            model.state_dict(), f"experiments/{experiment_name}/weather_gnn_best_{fold}.pth"
-        )
-        print("✅ model weights saved to weather_gnn_best.pth")
 
     fold_metrics = []
     for i in range(fold_count):
       train_fold(model_arr[i], train_loader=train_loader_arr[i], val_loader=val_loader_arr[i], fold = i, device=device)
+
+      # load the best model (not the last model found)
+      model_arr[i].load_state_dict(
+        torch.load(f"experiments/{experiment_name}/weather_gnn_best_{i}.pth", map_location=device)
+      )
       metrics_dict = test_model(model_arr[i], raingauge_station_mappings_df, test_loader_arr[i], device, fold = i, experiment_name=experiment_name)
       fold_metrics.append(metrics_dict)
 

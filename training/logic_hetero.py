@@ -21,6 +21,10 @@ import os
 
 config = read_config("config.yaml")
 
+# Number of data features per raingauge node (rainfall value + validity flag).
+# LPE columns start at index _DATA_FEATURE_DIM and must NOT be zeroed during masking.
+_DATA_FEATURE_DIM = 2
+
 def train_epoch(
     model,
     dataloader,
@@ -63,22 +67,12 @@ def train_epoch(
         for node_pos in range(num_nodes):
             x_masked = x.clone()
             indices_to_mask = torch.arange(num_graphs, device=device) * x.shape[0] // num_graphs + node_pos
-            x_masked[indices_to_mask, :] = 0
+            x_masked[indices_to_mask, :_DATA_FEATURE_DIM] = 0  # zero data features only; preserve LPE
 
             x_dict = {}
             for nodetype in batch.node_types:
                 x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
-            def check_nan(data_dict, name):
-                for key, tensor in data_dict.items():
-                    if torch.isnan(tensor).any():
-                        print(f"❌ Found NaN in {name} -> {key}")
-                    if torch.isinf(tensor).any():
-                        print(f"❌ Found Inf in {name} -> {key}")
-
-            check_nan(x_dict, "Node Features (x_dict)")
-            check_nan(edge_index_dict, "Edge Indices")
-            check_nan(edge_attr_dict, "Edge Attributes")
 
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
@@ -90,8 +84,6 @@ def train_epoch(
 
 
         batch_loss = batch_loss / num_nodes
-        if scheduler is not None:
-            scheduler.step()
         batch_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
@@ -101,8 +93,9 @@ def train_epoch(
                 "loss": batch_loss.item(),
             }
         )
-        #Step only at the end of each batch
         optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
 
     return float(np.mean(epoch_losses))
 
@@ -144,7 +137,7 @@ def validate(
             }
 
             x_masked = x.clone()
-            x_masked[val_mask, :] = 0.0
+            x_masked[val_mask, :_DATA_FEATURE_DIM] = 0.0  # zero data features only; preserve LPE
 
             x_dict = {}
             for nodetype in batch.node_types:
@@ -158,16 +151,6 @@ def validate(
             #loss = F.weighted_mse(out['raingauge'][val_mask], y[val_mask])
             loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
             epoch_losses.append(loss.item())
-
-            # Store predictions and targets for metric computation
-            all_preds.append(out['raingauge'][val_mask].detach().cpu())
-            all_targets.append(y[val_mask].detach().cpu())
-
-            charge_bar.set_postfix({"loss": loss.item()})
-
-    # Concatenate all predictions and targets
-    all_preds = torch.cat(all_preds, dim=0)  # [Total_val_nodes, out_channels]
-    all_targets = torch.cat(all_targets, dim=0)  # [Total_val_nodes, out_channels]
 
     # Compute metrics
     mean_loss = float(np.mean(epoch_losses))
@@ -220,7 +203,7 @@ def test_model(
 
             assert mask.shape[0] == x.shape[0], "Mask and x size mismatch"
             x_masked = x.clone()
-            x_masked[mask, :] = 0.0
+            x_masked[mask, :_DATA_FEATURE_DIM] = 0.0  # zero data features only; preserve LPE
 
             edge_attr_dict = {
                 edge_type: batch[edge_type].edge_attr
@@ -296,10 +279,10 @@ def test_model(
     # ============================================================
     # === TIMESTEP METRICS
     # ============================================================
-    temp_df = next(iter(dataloader))['raingauge']
-    batch_count = temp_df.ptr.shape[0] - 1
-    test_stations = temp_df.mask.sum()
-    test_station_count = test_stations // batch_count
+    # test_station_count derived from already-collected IDs: the test mask is fixed across
+    # all timesteps (same graph topology), so every unique local ID appears exactly once
+    # per timestep in all_station_ids.
+    test_station_count = int(all_station_ids.unique().shape[0])
     timestep_preds = all_preds.reshape(-1, test_station_count)
     timestep_targets = all_targets.reshape(-1, test_station_count)
     per_timestep_RMSE = torch.sqrt(
