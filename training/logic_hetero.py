@@ -308,6 +308,8 @@ def test_model(
         rows.append({
             "station_id": sid,
             "mae": m["mae"],
+            "rmse": m["rmse"],
+            "bias": m["bias"],
             "precision": m["precision"],
             "recall": m["recall"],
             "f1": m["f1"],
@@ -527,10 +529,14 @@ def compute_per_station_metrics(
             continue
 
         mae = compute_mae(p, t)
+        rmse = float(np.sqrt(np.mean((p - t) ** 2)))
+        bias = float(np.mean(p - t))          # positive → over-prediction
         cls = compute_binary_classification_metrics(p, t, threshold=threshold)
 
         results[int(sid)] = {
             "mae": mae,
+            "rmse": rmse,
+            "bias": bias,
             **cls,
         }
 

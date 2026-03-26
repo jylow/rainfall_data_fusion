@@ -44,7 +44,7 @@
     gauge_gauge: 5, #hyper_param
     radar_gauge: 9, #hyper_param
     cml_gauge: 5, #hyper_param
-    is_directed: True
+    is_directed: False
   },
 
   model: {

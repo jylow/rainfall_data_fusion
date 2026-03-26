@@ -236,22 +236,22 @@ class GaugeGraphNew():
 
 
 
-        self.fused_train_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(train_connecting_edges,dtype=torch.long).T
-        self.fused_validation_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(val_connecting_edges, dtype=torch.long).T
-        self.fused_test_heterodata['raingauge', 'connects', f'{layer_name}'].edge_index = torch.tensor(test_connecting_edges, dtype=torch.long).T
-
-        self.fused_train_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(train_connecting_edge_weight, dtype=torch.float32).T
-        self.fused_validation_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(val_connecting_edge_weight, dtype=torch.float32).T
-        self.fused_test_heterodata['raingauge', 'connects', f'{layer_name}'].edge_attr = torch.tensor(test_connecting_edge_weight, dtype=torch.float32).T
-
         if not config['layer_connect']['is_directed']:
-            self.fused_train_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(train_connecting_edges, dtype=torch.long).T.flip(0)
-            self.fused_validation_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(val_connecting_edges, dtype=torch.long).T.flip(0)
-            self.fused_test_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_index = torch.tensor(test_connecting_edges, dtype=torch.long).T.flip(0)
+            self.fused_train_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_index = torch.tensor(train_connecting_edges,dtype=torch.long).T
+            self.fused_validation_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_index = torch.tensor(val_connecting_edges, dtype=torch.long).T
+            self.fused_test_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_index = torch.tensor(test_connecting_edges, dtype=torch.long).T
 
-            self.fused_train_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(train_connecting_edge_weight, dtype=torch.float32)
-            self.fused_validation_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(val_connecting_edge_weight, dtype=torch.float32)
-            self.fused_test_heterodata[f'{layer_name}', 'rev_connects', 'raingauge'].edge_attr = torch.tensor(test_connecting_edge_weight, dtype=torch.float32)
+            self.fused_train_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_attr = torch.tensor(train_connecting_edge_weight, dtype=torch.float32).T
+            self.fused_validation_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_attr = torch.tensor(val_connecting_edge_weight, dtype=torch.float32).T
+            self.fused_test_heterodata['raingauge', 'rev_connects', f'{layer_name}'].edge_attr = torch.tensor(test_connecting_edge_weight, dtype=torch.float32).T
+
+        self.fused_train_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_index = torch.tensor(train_connecting_edges, dtype=torch.long).T.flip(0)
+        self.fused_validation_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_index = torch.tensor(val_connecting_edges, dtype=torch.long).T.flip(0)
+        self.fused_test_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_index = torch.tensor(test_connecting_edges, dtype=torch.long).T.flip(0)
+
+        self.fused_train_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_attr = torch.tensor(train_connecting_edge_weight, dtype=torch.float32)
+        self.fused_validation_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_attr = torch.tensor(val_connecting_edge_weight, dtype=torch.float32)
+        self.fused_test_heterodata[f'{layer_name}', 'connects', 'raingauge'].edge_attr = torch.tensor(test_connecting_edge_weight, dtype=torch.float32)
 
         return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
 
