@@ -2,7 +2,6 @@ import torch
 import tqdm
 import numpy as np
 import torch.nn.functional as F
-import time
 import pandas as pd
 
 from sklearn.metrics import (
@@ -10,7 +9,6 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     confusion_matrix,
-    classification_report,
     mean_absolute_error,
 )
 import matplotlib.pyplot as plt
@@ -30,10 +28,8 @@ def train_epoch(
     dataloader,
     optimizer,
     device,
-    verbose=False,
-    log_file="training_gnn_new_debug.log",
-    random_noise_masking=False,
     scheduler=None,
+    weighted_loss_alpha: float = 0.0,
 ):
     """
     Corrected training loop with gradient debugging.
@@ -76,10 +72,11 @@ def train_epoch(
 
             out = model(x_dict, edge_index_dict, edge_attr_dict)
 
-            # Compute loss ONLY on trainable nodes
-            #loss = F.huber_loss(out['raingauge'][indices_to_mask], y[indices_to_mask], delta = 10.0)
-            #loss = F.weighted_mse(out['raingauge'][indices_to_mask], y[indices_to_mask])
-            loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
+            # Compute loss ONLY on masked node
+            if weighted_loss_alpha > 0.0:
+                loss = weighted_mse(out['raingauge'][indices_to_mask], y[indices_to_mask], alpha=weighted_loss_alpha)
+            else:
+                loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
             batch_loss += loss
 
 
@@ -101,7 +98,7 @@ def train_epoch(
 
 
 def validate(
-    model, dataloader, device, verbose=False, log_file="validation_gnn_new_debug.log"
+    model, dataloader, device, weighted_loss_alpha: float = 0.0,
 ):
     """
     Validation loop for PyG batched graph data (inductive setting).
@@ -115,8 +112,6 @@ def validate(
     """
     model.eval()
     epoch_losses = []
-    all_preds = []
-    all_targets = []
 
     charge_bar = tqdm.tqdm(dataloader, desc="validation")
 
@@ -147,9 +142,10 @@ def validate(
             # Forward pass
             out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
 
-            #loss = F.huber_loss(out['raingauge'][val_mask], y[val_mask], delta=10.0)
-            #loss = F.weighted_mse(out['raingauge'][val_mask], y[val_mask])
-            loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
+            if weighted_loss_alpha > 0.0:
+                loss = weighted_mse(out['raingauge'][val_mask], y[val_mask], alpha=weighted_loss_alpha)
+            else:
+                loss = F.mse_loss(out['raingauge'][val_mask], y[val_mask])
             epoch_losses.append(loss.item())
 
     # Compute metrics
@@ -432,12 +428,23 @@ def test_model(
         "threshold": rain_threshold,
         "per_station_metrics": per_station,
     }
-def weighted_mse(pred, target, alpha=2.0):
+def weighted_mse(pred, target, alpha: float = 1.0):
     """
-    Penalizes underestimates on large actuals more heavily.
-    alpha controls how aggressively large values are upweighted.
+    Weighted MSE loss that up-weights high-rainfall timesteps.
+
+    For target=0   → weight = 1.0              (dry reading, baseline)
+    For target=10  → weight = 1 + alpha*log(11)  ≈ 1 + 2.4*alpha
+    For target=50  → weight = 1 + alpha*log(51)  ≈ 1 + 3.9*alpha
+
+    Use alpha=0.0 to recover plain MSE.
+    Use alpha=1.0 (default) for mild upweighting.
+    Use alpha=2.0–4.0 for aggressive upweighting of heavy rain events.
+
+    NOTE: Use this as the TRAINING loss, not RMSE directly.
+    RMSE divides by itself in the gradient, causing instability when the
+    loss is already small.  This function is the numerically stable equivalent.
     """
-    weights = 1 + torch.log1p(target)  # larger actuals = higher weight
+    weights = 1.0 + alpha * torch.log1p(target.clamp(min=0.0))
     return (weights * (pred - target) ** 2).mean()
 
 def compute_mae(preds: np.ndarray, targets: np.ndarray) -> float:

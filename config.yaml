@@ -36,6 +36,7 @@
       batch_size: 256, #hyper_param
       epochs: 100,
       early_stop: 5,
+      weighted_loss_alpha: 1.0,  # 0.0 = plain MSE; increase to upweight rain events
   },
 
   datasources: ['raingauge', 'radar', 'cml'],

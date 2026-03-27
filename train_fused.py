@@ -205,17 +205,17 @@ def train_fused(config):
             # CHECK 2: Print weight before training
             #weight_before = first_param.data.clone()
 
+            weighted_alpha = config['training_params'].get('weighted_loss_alpha', 0.0)
             train_loss = train_epoch(
                 model,
                 train_loader,
                 optimizer,
                 device,
-                verbose=False,
-                random_noise_masking=False,
+                weighted_loss_alpha=weighted_alpha,
             )
             print(train_loss)
 
-            validation_loss = validate(model, val_loader, device)
+            validation_loss = validate(model, val_loader, device, weighted_loss_alpha=weighted_alpha)
             training_loss_arr.append(train_loss)
             validation_loss_arr.append(validation_loss)
             perf.log_epoch(i, train_loss, validation_loss)
