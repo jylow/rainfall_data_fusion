@@ -39,13 +39,13 @@
       weighted_loss_alpha: 1.0,  # 0.0 = plain MSE; increase to upweight rain events
   },
 
-  datasources: ['raingauge', 'radar', 'cml'],
+  datasources: ['raingauge', 'cml'],
 
   layer_connect: {
     gauge_gauge: 5, #hyper_param
     radar_gauge: 9, #hyper_param
     cml_gauge: 5, #hyper_param
-    is_directed: False
+    is_directed: True
   },
 
   model: {
@@ -53,5 +53,13 @@
     num_layers: 2, #hyper_param
     learning_rate: 0.001,
     weight_decay: 1e-4,
+  },
+
+  # Spatio-temporal parameters (used by train_st.py only; ignored by train_fused.py)
+  temporal_params: {
+    window_size: 6,          # number of preceding timesteps used as LSTM context (W)
+    max_gap_minutes: 10,     # windows spanning a gap > this value are dropped
+    lstm_hidden: 32,         # LSTM hidden state dimension
+    lstm_layers: 1,          # number of stacked LSTM layers
   }
 }
