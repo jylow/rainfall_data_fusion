@@ -88,7 +88,7 @@ def train_st(config):
     # Temporal hyperparameters — read from config with defaults
     tp = config.get("temporal_params", {})
     window_size      = tp.get("window_size",      6)
-    max_gap_minutes  = tp.get("max_gap_minutes",  10)
+    max_gap_minutes  = tp.get("max_gap_minutes",  30)
     lstm_hidden      = tp.get("lstm_hidden",       32)
     lstm_layers      = tp.get("lstm_layers",       1)
 
@@ -137,6 +137,10 @@ def train_st(config):
     print(f"raingauge_df : {raingauge_df.shape}")
     print(f"radar_df     : {radar_df.shape}")
     print(f"cml_df       : {cml_df.shape}")
+
+    raingauge_df = raingauge_df.sort_values(by='timestamp')
+    radar_df = radar_df.sort_values(by='timestamp')
+    cml_df = cml_df.sort_values(by='timestamp')
 
     # Timestamps aligned with the T dimension of all heterodata objects
     timestamps = raingauge_df["timestamp"].values
