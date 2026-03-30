@@ -187,7 +187,10 @@ def train_st(config):
     #    heterodata, causing the context-window slicing in SpatioTemporalDataset
     #    to pick up non-chronological steps and silently produce wrong windows.
     # ------------------------------------------------------------------
-    raingauge_df_raw = raingauge_df_raw.sort_values("timestamp").reset_index(drop=True)
+    # raingauge_df_raw comes from pivot(index="timestamp"), so timestamp is the
+    # index, not a column.  reset_index() promotes it to a column so that
+    # sort_values and the subsequent left-join on "timestamp" both work.
+    raingauge_df_raw = raingauge_df_raw.reset_index().sort_values("timestamp").reset_index(drop=True)
     radar_df_raw     = radar_df_raw.sort_values("timestamp").reset_index(drop=True)
     cml_df_raw       = cml_df_raw.sort_values("timestamp").reset_index(drop=True)
 
@@ -245,13 +248,6 @@ def train_st(config):
     print(f"raingauge_df : {raingauge_df.shape}")
     print(f"radar_df     : {radar_df.shape}")
     print(f"cml_df       : {cml_df.shape}")
-
-    raingauge_df = raingauge_df.sort_values(by='timestamp')
-    radar_df = radar_df.sort_values(by='timestamp')
-    cml_df = cml_df.sort_values(by='timestamp')
-
-    # Timestamps aligned with the T dimension of all heterodata objects
-    timestamps = raingauge_df["timestamp"].values
 
     # ------------------------------------------------------------------
     # 6. Stratified spatial k-fold split
