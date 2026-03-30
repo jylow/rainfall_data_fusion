@@ -273,7 +273,7 @@ class GNNInductive(torch.nn.Module):
         return out
 
 class GNNInductiveHetero(torch.nn.Module):
-    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers, edge_types):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers, edge_types, dropout=0.0):
         """
         Args:
             in_channels_dict: dict
@@ -281,6 +281,8 @@ class GNNInductiveHetero(torch.nn.Module):
                     'raingauge': F_g,
                     'radar': F_r
                 }
+            dropout: dropout probability applied after each GNN layer's activation.
+                     0.0 disables dropout entirely.
         """
         super().__init__()
 
@@ -290,6 +292,7 @@ class GNNInductiveHetero(torch.nn.Module):
             out_channels=out_channels,
             num_layers=num_layers,
         )
+        self.dropout = nn.Dropout(p=dropout)
 
         self.convs = torch.nn.ModuleList()
 
@@ -307,11 +310,7 @@ class GNNInductiveHetero(torch.nn.Module):
 
             self.convs.append(conv)
 
-        self.lin= Linear(hidden_channels, out_channels)
-
-        # # Optional: normalization
-        # self.norm_general = torch.nn.LayerNorm(hidden_channels)
-        # self.norm_rainfall = torch.nn.LayerNorm(hidden_channels)
+        self.lin = Linear(hidden_channels, out_channels)
 
     def forward(self, x_dict, edge_index_dict, edge_attr_dict):
         h_dict = x_dict
@@ -320,17 +319,10 @@ class GNNInductiveHetero(torch.nn.Module):
             h_dict = conv(
                 h_dict,
                 edge_index_dict,
-                edge_weight_dict = edge_attr_dict,
+                edge_weight_dict=edge_attr_dict,
             )
+            h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 
-            # Apply activation after each layer
-            h_dict = {k: F.relu(v) for k, v in h_dict.items()}
-
-        # # Optionally normalize
-        # h_dict['general_station'] = self.norm_general(h_dict['general_station'])
-        # h_dict['rainfall_station'] = self.norm_rainfall(h_dict['rainfall_station'])
-
-        # Output prediction heads
         out_dict = {
             'raingauge': F.softplus(self.lin(h_dict['raingauge'])),
         }

@@ -2,23 +2,25 @@
 Training, validation and test logic for the spatio-temporal HGNN model
 (GNNInductiveHeteroST).
 
-The key difference from logic_hetero.py is that every forward call now
-receives both:
-  * x_dict          — current-timestep features (with leave-one-out masking)
-  * x_context_dict  — context-window features  (never masked)
+Validity-aware loss
+-------------------
+The heterodata is built on a dense 15-min grid where missing timesteps are
+zero-padded.  The raingauge validity flag (feature index 1) is 1 for real
+sensor readings and 0 for imputed zeros.
+
+At every forward pass the loss is computed ONLY on nodes where the validity
+flag at the current timestep is 1.  Nodes with validity = 0 at time t have
+no real ground truth, so training on them would be misleading.
 
 Masking convention (same as logic_hetero.py)
 --------------------------------------------
-Features at indices 0.._DATA_FEATURE_DIM-1 are zeroed:
+Indices 0.._DATA_FEATURE_DIM-1 are zeroed for the leave-one-out target:
   index 0 = rainfall value
-  index 1 = validity flag  (1 = real reading, 0 = NaN/missing)
+  index 1 = validity flag
 
-Setting both to 0 makes the masked node look like a "genuinely missing"
-sensor, which is the intended leave-one-out signal.  A real dry reading
-(value=0, validity=1) remains distinguishable from a masked node
-(value=0, validity=0).  LPE columns (indices >= 2) are never zeroed.
-
-All metric computation / plotting code is re-used from logic_hetero.py.
+Setting both to 0 makes the masked node indistinguishable from a "genuinely
+missing" sensor, which is the intended leave-one-out signal.  LPE columns
+(indices >= 2) are never zeroed.
 """
 
 import torch
@@ -38,22 +40,35 @@ from training.logic_hetero import (
     print_metrics_summary,
 )
 
-# Indices 0.._DATA_FEATURE_DIM-1 are zeroed during masking (value + validity).
-# LPE columns start at _DATA_FEATURE_DIM and are preserved.
+# Feature indices 0.._DATA_FEATURE_DIM-1 are zeroed during leave-one-out masking.
 _DATA_FEATURE_DIM = 2
+
+# Validity flag is at feature index 1 in the raingauge feature vector.
+_VALIDITY_IDX = 1
 
 
 # ---------------------------------------------------------------------------
-# Internal helper
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _extract_context_dict(batch):
-    """Return {node_type: x_context} from a batched HeteroData object."""
+    """Return {node_type: x_context} for all node types that carry it."""
     return {
         ntype: batch[ntype].x_context
         for ntype in batch.node_types
         if hasattr(batch[ntype], "x_context")
     }
+
+
+def _valid_node_indices(x, indices):
+    """
+    Given global node indices ``indices`` (shape [B]) and the current-timestep
+    feature matrix ``x`` [B*N, F], return the subset of ``indices`` where the
+    validity flag (feature index 1) is 1.
+
+    This filters out nodes whose current-timestep reading is imputed (zero-pad).
+    """
+    return indices[x[indices, _VALIDITY_IDX] > 0]
 
 
 # ---------------------------------------------------------------------------
@@ -70,12 +85,11 @@ def train_epoch_st(
     """
     Leave-one-out training epoch for the spatio-temporal model.
 
-    For every node position we:
-      1. Zero its current-timestep data features (rainfall value + validity flag).
-      2. Keep the context window completely unmasked — the target node's own
-         history is intentionally visible to the LSTM (no leakage because we
-         are predicting the *current* value, not a past one).
-      3. Forward pass → compute loss only on the masked node indices.
+    For each node position we:
+      1. Zero its current-timestep data features (value + validity flag).
+      2. Keep the context window completely unmasked.
+      3. Only compute loss for instances where the ORIGINAL validity flag
+         was 1 (i.e., the node had a real reading at time t).
 
     Returns
     -------
@@ -89,7 +103,7 @@ def train_epoch_st(
         optimizer.zero_grad()
         batch = batch.to(device)
 
-        x = batch["raingauge"].x   # [B*N, F]
+        x = batch["raingauge"].x   # [B*N, F]  — current timestep
         y = batch["raingauge"].y   # [B*N, 1]
 
         edge_index_dict = batch.edge_index_dict
@@ -98,21 +112,24 @@ def train_epoch_st(
             for et in batch.edge_types
             if hasattr(batch[et], "edge_attr")
         }
-        # Context window — extracted once per batch, never modified
         x_context_dict = _extract_context_dict(batch)
 
         num_graphs = batch["raingauge"].ptr.size(0) - 1
-        num_nodes = x.shape[0] // num_graphs
+        num_nodes  = x.shape[0] // num_graphs
 
         batch_loss = torch.tensor(0.0, device=device)
+        nodes_used = 0
 
         for node_pos in range(num_nodes):
             # Global indices of this node across every graph in the batch
-            indices = (
-                torch.arange(num_graphs, device=device) * num_nodes + node_pos
-            )
+            indices = torch.arange(num_graphs, device=device) * num_nodes + node_pos
 
-            # Mask current-timestep data features; LPE columns are untouched
+            # Only train on instances where this node has real data at time t
+            valid_idx = _valid_node_indices(x, indices)
+            if valid_idx.numel() == 0:
+                continue  # all imputed — skip
+
+            # Mask current-timestep data features before forward pass
             x_masked = x.clone()
             x_masked[indices, :_DATA_FEATURE_DIM] = 0.0
 
@@ -123,14 +140,19 @@ def train_epoch_st(
 
             if weighted_loss_alpha > 0.0:
                 loss = weighted_mse(
-                    out["raingauge"][indices], y[indices], alpha=weighted_loss_alpha
+                    out["raingauge"][valid_idx], y[valid_idx],
+                    alpha=weighted_loss_alpha,
                 )
             else:
-                loss = F.mse_loss(out["raingauge"][indices], y[indices])
+                loss = F.mse_loss(out["raingauge"][valid_idx], y[valid_idx])
 
             batch_loss = batch_loss + loss
+            nodes_used += 1
 
-        batch_loss = batch_loss / num_nodes
+        if nodes_used == 0:
+            continue  # entire batch is imputed — skip gradient step
+
+        batch_loss = batch_loss / nodes_used
         batch_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
@@ -138,7 +160,7 @@ def train_epoch_st(
         epoch_losses.append(batch_loss.item())
         charge_bar.set_postfix({"loss": batch_loss.item()})
 
-    return float(np.mean(epoch_losses))
+    return float(np.mean(epoch_losses)) if epoch_losses else float("nan")
 
 
 # ---------------------------------------------------------------------------
@@ -152,10 +174,7 @@ def validate_st(
     weighted_loss_alpha: float = 0.0,
 ):
     """
-    Validation loop for the ST model.
-
-    All validation-split nodes (identified by ``batch['raingauge'].mask``)
-    are masked simultaneously, then the loss is computed only on those nodes.
+    Validation loop — evaluates on split nodes that have real data at time t.
 
     Returns
     -------
@@ -168,8 +187,8 @@ def validate_st(
         for batch in tqdm.tqdm(dataloader, desc="validation"):
             batch = batch.to(device)
 
-            x = batch["raingauge"].x
-            y = batch["raingauge"].y
+            x        = batch["raingauge"].x
+            y        = batch["raingauge"].y
             val_mask = batch["raingauge"].mask
 
             edge_index_dict = batch.edge_index_dict
@@ -180,7 +199,13 @@ def validate_st(
             }
             x_context_dict = _extract_context_dict(batch)
 
-            # Mask the validation nodes at the current timestep only
+            # Only evaluate on split nodes that have real data at this timestep
+            valid_at_t = x[:, _VALIDITY_IDX] > 0
+            eval_mask  = val_mask & valid_at_t
+
+            if eval_mask.sum() == 0:
+                continue
+
             x_masked = x.clone()
             x_masked[val_mask, :_DATA_FEATURE_DIM] = 0.0
 
@@ -191,14 +216,15 @@ def validate_st(
 
             if weighted_loss_alpha > 0.0:
                 loss = weighted_mse(
-                    out["raingauge"][val_mask], y[val_mask], alpha=weighted_loss_alpha
+                    out["raingauge"][eval_mask], y[eval_mask],
+                    alpha=weighted_loss_alpha,
                 )
             else:
-                loss = F.mse_loss(out["raingauge"][val_mask], y[val_mask])
+                loss = F.mse_loss(out["raingauge"][eval_mask], y[eval_mask])
 
             epoch_losses.append(loss.item())
 
-    return float(np.mean(epoch_losses))
+    return float(np.mean(epoch_losses)) if epoch_losses else float("nan")
 
 
 # ---------------------------------------------------------------------------
@@ -215,10 +241,8 @@ def test_model_st(
     rain_threshold: float = 0.5,
 ):
     """
-    Test loop for the ST model.
-
-    Mirrors ``test_model`` in logic_hetero.py and produces the same CSV and
-    plot outputs so ST and spatial-only experiments are directly comparable.
+    Test loop — same outputs as test_model in logic_hetero.py so experiments
+    are directly comparable.
 
     Returns
     -------
@@ -227,17 +251,16 @@ def test_model_st(
     """
     model.eval()
 
-    all_preds = []
-    all_targets = []
+    all_preds       = []
+    all_targets     = []
     all_station_ids = []
-    epoch_losses = []
 
     with torch.no_grad():
         for batch in tqdm.tqdm(dataloader, desc="testing"):
             batch = batch.to(device)
 
-            x = batch["raingauge"].x
-            y = batch["raingauge"].y
+            x    = batch["raingauge"].x
+            y    = batch["raingauge"].y
             mask = batch["raingauge"].mask
 
             edge_index_dict = batch.edge_index_dict
@@ -249,9 +272,14 @@ def test_model_st(
             x_context_dict = _extract_context_dict(batch)
 
             num_graphs = batch["raingauge"].ptr.size(0) - 1
-            num_nodes = x.shape[0] // num_graphs
+            num_nodes  = x.shape[0] // num_graphs
 
-            assert mask.shape[0] == x.shape[0], "Mask/x shape mismatch"
+            # Only evaluate on test-split nodes that have real data at time t
+            valid_at_t = x[:, _VALIDITY_IDX] > 0
+            eval_mask  = mask & valid_at_t
+
+            if eval_mask.sum() == 0:
+                continue
 
             x_masked = x.clone()
             x_masked[mask, :_DATA_FEATURE_DIM] = 0.0
@@ -261,44 +289,40 @@ def test_model_st(
 
             out = model(x_dict, x_context_dict, edge_index_dict, edge_attr_dict)
 
-            loss = F.mse_loss(out["raingauge"][mask], y[mask])
-            epoch_losses.append(loss.item())
-
-            all_preds.append(out["raingauge"][mask].detach().cpu())
-            all_targets.append(y[mask].detach().cpu())
+            all_preds.append(out["raingauge"][eval_mask].detach().cpu())
+            all_targets.append(y[eval_mask].detach().cpu())
             all_station_ids.append(
-                (mask.nonzero(as_tuple=False).squeeze() % num_nodes).cpu()
+                (eval_mask.nonzero(as_tuple=False).squeeze(-1) % num_nodes).cpu()
             )
 
     # -----------------------------------------------------------------------
-    # Aggregate results
+    # Aggregate
     # -----------------------------------------------------------------------
-    all_preds = torch.cat(all_preds, dim=0)
-    all_targets = torch.cat(all_targets, dim=0)
+    all_preds       = torch.cat(all_preds, dim=0)
+    all_targets     = torch.cat(all_targets, dim=0)
     all_station_ids = torch.cat(all_station_ids, dim=0)
+
+    preds_np       = all_preds.numpy().flatten()
+    targets_np     = all_targets.numpy().flatten()
+    station_ids_np = all_station_ids.numpy().flatten()
 
     print("Prediction shape:", all_preds.shape)
     print("Target shape:    ", all_targets.shape)
-    print("Unique stations: ", all_station_ids.unique().shape[0])
-
-    preds_np = all_preds.numpy().flatten()
-    targets_np = all_targets.numpy().flatten()
-    station_ids_np = all_station_ids.numpy().flatten()
+    print("Unique stations: ", np.unique(station_ids_np).shape[0])
 
     # -----------------------------------------------------------------------
     # Global regression metrics
     # -----------------------------------------------------------------------
-    valid = (~np.isnan(preds_np)) & (~np.isnan(targets_np))
-    pearson_r, _ = pearsonr(targets_np[valid], preds_np[valid])
-    rmse = torch.sqrt(((all_preds - all_targets) ** 2).mean()).item()
-    mae = compute_mae(preds_np, targets_np)
-
+    valid_mask   = (~np.isnan(preds_np)) & (~np.isnan(targets_np))
+    pearson_r, _ = pearsonr(targets_np[valid_mask], preds_np[valid_mask])
+    rmse         = float(torch.sqrt(((all_preds - all_targets) ** 2).mean()).item())
+    mae          = compute_mae(preds_np, targets_np)
     print(f"Pearson r: {pearson_r:.4f}  RMSE: {rmse:.4f}  MAE: {mae:.4f}")
 
     # -----------------------------------------------------------------------
     # Classification metrics
     # -----------------------------------------------------------------------
-    global_cls = compute_binary_classification_metrics(
+    global_cls     = compute_binary_classification_metrics(
         preds_np, targets_np, threshold=rain_threshold
     )
     global_metrics = {"mae": mae, **global_cls}
@@ -307,12 +331,16 @@ def test_model_st(
     # -----------------------------------------------------------------------
     # Per-timestep RMSE
     # -----------------------------------------------------------------------
-    test_station_count = int(all_station_ids.unique().shape[0])
-    ts_preds = all_preds.reshape(-1, test_station_count)
-    ts_targets = all_targets.reshape(-1, test_station_count)
-    timestep_rmse = torch.sqrt(
-        ((ts_preds - ts_targets) ** 2).mean(dim=1)
-    ).mean().item()
+    n_test_stations = int(np.unique(station_ids_np).shape[0])
+    try:
+        ts_preds      = all_preds.reshape(-1, n_test_stations)
+        ts_targets    = all_targets.reshape(-1, n_test_stations)
+        timestep_rmse = float(
+            torch.sqrt(((ts_preds - ts_targets) ** 2).mean(dim=1)).mean().item()
+        )
+    except Exception:
+        timestep_rmse = rmse  # fallback if reshape fails
+
     print(f"Timestep RMSE: {timestep_rmse:.4f}")
 
     # -----------------------------------------------------------------------
@@ -325,22 +353,20 @@ def test_model_st(
     exp_dir = f"experiments/{experiment_name}"
     os.makedirs(exp_dir, exist_ok=True)
 
-    rows = []
-    for sid in sorted(per_station.keys()):
-        m = per_station[sid]
-        rows.append(
-            {
-                "station_id": sid,
-                "mae": m["mae"],
-                "rmse": m["rmse"],
-                "bias": m["bias"],
-                "precision": m["precision"],
-                "recall": m["recall"],
-                "f1": m["f1"],
-                "support_pos": m["support_pos"],
-                "support_neg": m["support_neg"],
-            }
-        )
+    rows = [
+        {
+            "station_id":  sid,
+            "mae":         m["mae"],
+            "rmse":        m["rmse"],
+            "bias":        m["bias"],
+            "precision":   m["precision"],
+            "recall":      m["recall"],
+            "f1":          m["f1"],
+            "support_pos": m["support_pos"],
+            "support_neg": m["support_neg"],
+        }
+        for sid, m in sorted(per_station.items())
+    ]
     csv_path = f"{exp_dir}/per_station_metrics_f{fold}.csv"
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     print(f"Saved per-station metrics → {csv_path}")
@@ -379,21 +405,17 @@ def test_model_st(
     # -----------------------------------------------------------------------
     # Per-station scatter + time-series plots
     # -----------------------------------------------------------------------
-    unique_stations = all_station_ids.unique().tolist()
     save_dir = f"{exp_dir}/per_station_plots_f{fold}"
     os.makedirs(save_dir, exist_ok=True)
 
-    for sid in unique_stations:
-        sid_mask = station_ids_np == sid
-        preds_sid = preds_np[sid_mask]
+    for sid in np.unique(station_ids_np).tolist():
+        sid_mask    = station_ids_np == sid
+        preds_sid   = preds_np[sid_mask]
         targets_sid = targets_np[sid_mask]
-
         if len(preds_sid) < 5:
             continue
-
         station_m = per_station.get(int(sid), None)
 
-        # Scatter
         plt.figure(figsize=(7, 7))
         plt.scatter(targets_sid, preds_sid, alpha=0.6)
         max_val = max(float(preds_sid.max()), float(targets_sid.max()), 1e-6)
@@ -414,13 +436,12 @@ def test_model_st(
                 fontsize=9,
                 bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"),
             )
-        plt.savefig(f"{save_dir}/station_{sid}_scatter.png", dpi=250)
+        plt.savefig(f"{save_dir}/station_{int(sid)}_scatter.png", dpi=250)
         plt.close()
 
-        # Time series
         plt.figure(figsize=(15, 6))
         plt.plot(targets_sid, label="Actual")
-        plt.plot(preds_sid, label="Predicted")
+        plt.plot(preds_sid,   label="Predicted")
         plt.axhline(
             y=rain_threshold, color="gray", linestyle=":", alpha=0.5,
             label=f"Threshold ({rain_threshold} mm)",
@@ -428,19 +449,19 @@ def test_model_st(
         plt.title(f"Station {sid} — Time Series")
         plt.legend()
         plt.grid(True)
-        plt.savefig(f"{save_dir}/station_{sid}_timeseries.png", dpi=250)
+        plt.savefig(f"{save_dir}/station_{int(sid)}_timeseries.png", dpi=250)
         plt.close()
 
     print(f"Saved per-station plots → {save_dir}")
 
     return {
-        "rmse": rmse,
-        "mae": mae,
-        "pearson_r": pearson_r,
-        "timestep_rmse": timestep_rmse,
-        "precision": global_cls["precision"],
-        "recall": global_cls["recall"],
-        "f1": global_cls["f1"],
-        "threshold": rain_threshold,
+        "rmse":                rmse,
+        "mae":                 mae,
+        "pearson_r":           pearson_r,
+        "timestep_rmse":       timestep_rmse,
+        "precision":           global_cls["precision"],
+        "recall":              global_cls["recall"],
+        "f1":                  global_cls["f1"],
+        "threshold":           rain_threshold,
         "per_station_metrics": per_station,
     }

@@ -60,12 +60,14 @@ class GNNInductiveHeteroST(nn.Module):
         window_size: int,
         lstm_hidden: int = 32,
         lstm_layers: int = 1,
+        dropout: float = 0.0,
     ):
         super().__init__()
 
         self.window_size = window_size
         self.lstm_hidden = lstm_hidden
         self.node_types = list(in_channels_dict.keys())
+        self.dropout = nn.Dropout(p=dropout)
 
         # ------------------------------------------------------------------
         # 1. LSTM encoders — one per node type
@@ -144,11 +146,11 @@ class GNNInductiveHeteroST(nn.Module):
 
             # ---- Feature fusion & projection ----
             x_aug = torch.cat([x_cur, temp_emb], dim=-1)  # [B*N, F + lstm_hidden]
-            h_dict[ntype] = F.relu(self.input_proj[ntype](x_aug))  # [B*N, hidden_channels]
+            h_dict[ntype] = self.dropout(F.relu(self.input_proj[ntype](x_aug)))  # [B*N, hidden_channels]
 
         # ---- GNN message-passing ----
         for conv in self.convs:
             h_dict = conv(h_dict, edge_index_dict, edge_weight_dict=edge_attr_dict)
-            h_dict = {k: F.relu(v) for k, v in h_dict.items()}
+            h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 
         return {"raingauge": F.softplus(self.lin(h_dict["raingauge"]))}

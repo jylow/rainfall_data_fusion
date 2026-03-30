@@ -1,28 +1,24 @@
 """
 train_st.py  —  Spatio-Temporal rainfall interpolation training pipeline.
 
-Extends train_fused.py with a temporal context window fed to an LSTM encoder
-inside the model (GNNInductiveHeteroST).  The spatial graph construction,
-k-fold split strategy, normalisation, and evaluation metrics are identical to
-train_fused.py so the two experiments are directly comparable.
+Dense-grid approach
+-------------------
+All three data sources (raingauge, radar, CML) are left-joined onto a
+complete 15-minute time grid that spans the full dataset period.  Missing
+entries are zero-padded and a per-node-per-timestep validity flag (feature
+index 1 for raingauge / a dedicated column for CML / a second feature
+channel for radar) tells the LSTM which context steps are real vs. imputed.
 
 Key differences vs train_fused.py
 -----------------------------------
-1. Dataset  : SpatioTemporalDataset (window of W preceding timesteps) instead
-              of HeterogeneousWeatherGraphDatasetInductive (single timestep).
-2. Model    : GNNInductiveHeteroST (LSTM + GNN) instead of GNNInductiveHetero.
-3. Masking  : Only the *current-timestep* value of the target node is zeroed.
-              The context window for that node is kept intact — no leakage
-              because we are predicting the current value, not a past one.
-4. Config   : Reads a [temporal_params] section from config.yaml (added below).
-              Falls back to sensible defaults if the section is absent so that
-              train_fused.py continues to work unchanged.
-
-Non-contiguous / missing timesteps
-------------------------------------
-SpatioTemporalDataset automatically filters out target timesteps whose
-preceding W-step window spans a gap larger than max_gap_minutes.  These
-samples are silently dropped; no imputation is performed.
+1. Data loading : left-join on complete 15-min grid instead of inner join.
+2. Validity flags: every node type carries explicit 0/1 validity information.
+3. Dataset       : SpatioTemporalDataset yields context windows; every
+                   timestep where at least one raingauge node is valid is a
+                   training target — no windows are dropped due to gaps.
+4. Model         : GNNInductiveHeteroST (LSTM + GNN).
+5. Training loop : per-node validity check before loss computation so the
+                   model is never trained to predict an imputed zero value.
 """
 
 from src.sampling.main import stratified_spatial_kfold_dual  # must be first
@@ -55,7 +51,6 @@ from src.graph.st_dataset import SpatioTemporalDataset
 # ---------------------------------------------------------------------------
 
 def compute_norm_stats(heterodata):
-    """Compute per-feature mean and std from one split's node features [N, T, F]."""
     stats = {}
     for node_type in heterodata.node_types:
         x = heterodata[node_type].x  # [N, T, F]
@@ -66,13 +61,82 @@ def compute_norm_stats(heterodata):
 
 
 def apply_norm(heterodata, stats):
-    """Apply precomputed normalisation stats.  Only touches .x, never .y."""
+    """Apply precomputed stats. Only touches .x, never .y."""
     normed = heterodata.clone()
     for node_type in heterodata.node_types:
         if node_type in stats:
             mean, std = stats[node_type]
             normed[node_type].x = (heterodata[node_type].x - mean) / std
     return normed
+
+
+# ---------------------------------------------------------------------------
+# CML expansion helper
+# ---------------------------------------------------------------------------
+
+# Columns that are static per (link_id, station) — used to build the full
+# (timestamp × link × station) index.  Any subset that is missing from the
+# actual CML dataframe is silently ignored.
+_CML_STATIC_COLS = [
+    "link_id", "station",
+    "site_a_latitude", "site_a_longitude",
+    "site_b_latitude", "site_b_longitude",
+    "length", "frequency", "polarization",
+]
+_CML_INDEX_COLS = ["timestamp", "link_id", "station"]
+
+
+def _expand_cml_to_dense_grid(cml_df: pd.DataFrame, complete_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Expand a long-format CML dataframe to cover every timestamp in
+    complete_df for every (link_id, station) pair.
+
+    Missing (timestamp, link, station) rows are zero-padded and receive a
+    ``valid = 0`` flag.  Real rows receive ``valid = 1``.
+
+    The ``valid`` column is included as a regular feature so CMLGraph's
+    pivot_table picks it up automatically.
+    """
+    present_static = [c for c in _CML_STATIC_COLS if c in cml_df.columns]
+    cml_static = (
+        cml_df[present_static]
+        .drop_duplicates(["link_id", "station"])
+        .reset_index(drop=True)
+    )
+
+    # Dynamic feature columns (everything except static non-index cols)
+    _static_non_index = [c for c in present_static if c not in ["link_id", "station"]]
+    dynamic_cols = [c for c in cml_df.columns if c not in _static_non_index]
+
+    cml_dynamic = cml_df[dynamic_cols].drop_duplicates(_CML_INDEX_COLS)
+
+    # Build complete (timestamp × link × station) index
+    complete_cml_index = complete_df.merge(
+        cml_static[["link_id", "station"]], how="cross"
+    )
+
+    # Left-join dynamic features
+    cml_expanded = complete_cml_index.merge(
+        cml_dynamic, on=_CML_INDEX_COLS, how="left"
+    )
+
+    # Restore static columns (may be NaN after merge due to column overlap)
+    cml_expanded = cml_expanded.merge(
+        cml_static, on=["link_id", "station"], how="left", suffixes=("_drop", "")
+    )
+    for col in _static_non_index:
+        if f"{col}_drop" in cml_expanded.columns:
+            cml_expanded = cml_expanded.drop(columns=[f"{col}_drop"])
+
+    # Validity flag: 1 where real data existed, 0 for padded rows
+    # Use the first dynamic feature column (not the index cols) to detect presence
+    _check_cols = [c for c in cml_dynamic.columns if c not in _CML_INDEX_COLS]
+    if _check_cols:
+        cml_expanded["valid"] = cml_expanded[_check_cols[0]].notna().astype(float)
+    else:
+        cml_expanded["valid"] = 1.0
+
+    return cml_expanded.fillna(0)
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +149,10 @@ def train_st(config):
     fold_count = config["training_params"]["fold_count"]
     datasources = config["datasources"]
 
-    # Temporal hyperparameters — read from config with defaults
     tp = config.get("temporal_params", {})
-    window_size      = tp.get("window_size",      6)
-    max_gap_minutes  = tp.get("max_gap_minutes",  10)
-    lstm_hidden      = tp.get("lstm_hidden",       32)
-    lstm_layers      = tp.get("lstm_layers",       1)
+    window_size     = tp.get("window_size",      6)
+    lstm_hidden     = tp.get("lstm_hidden",       32)
+    lstm_layers     = tp.get("lstm_layers",       1)
 
     # ------------------------------------------------------------------
     # Experiment folder
@@ -100,56 +162,96 @@ def train_st(config):
     perf = PerformanceLogger(f"experiments/{experiment_name}/training_log.jsonl")
 
     # ------------------------------------------------------------------
-    # Load data
+    # 1. Load raw data
     # ------------------------------------------------------------------
     uptime_threshold = config["filters"]["uptime_threshold"]
     start_year       = config["dataset_parameters"]["start_year"]
     end_year         = config["dataset_parameters"]["end_year"]
 
-    raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(
+    raingauge_df_raw, raingauge_station_mappings_df = load_raingauge_dataset(
         start=start_year, end=end_year, uptime_threshold=uptime_threshold
     )
-    radar_df = load_processed_dataset("database/processed_radar_dataset.pkl")
-
-    # ------------------------------------------------------------------
-    # Inner-join all sources on timestamp
-    # ------------------------------------------------------------------
-    radar_cols     = radar_df.columns
-    raingauge_cols = raingauge_df.columns
-    merged_df      = radar_df.merge(raingauge_df, on=["timestamp"], how="inner")
-
-    cml_df, cml_coordinates_df = load_cml_dataset(
+    radar_df_raw = load_processed_dataset("database/processed_radar_dataset.pkl")
+    cml_df_raw, cml_coordinates_df = load_cml_dataset(
         config["dataset_parameters"]["cml_folder"]
     )
-    cml_df    = cml_df.fillna(0)
-    cml_cols  = cml_df.columns
-    merged_df = merged_df.merge(cml_df, on=["timestamp"], how="inner")
-    cml_df    = merged_df[cml_cols]
 
-    raingauge_df = (
-        pd.concat([merged_df["timestamp"], merged_df[raingauge_cols]], axis=1)
-        .drop_duplicates()
-        .reset_index(drop=True)
+    # ------------------------------------------------------------------
+    # 2. Build complete 15-minute time grid
+    #    Sort raw sources by timestamp first — merges preserve left-df order,
+    #    so an unsorted source would produce an unsorted T dimension in the
+    #    heterodata, causing the context-window slicing in SpatioTemporalDataset
+    #    to pick up non-chronological steps and silently produce wrong windows.
+    # ------------------------------------------------------------------
+    raingauge_df_raw = raingauge_df_raw.sort_values("timestamp").reset_index(drop=True)
+    radar_df_raw     = radar_df_raw.sort_values("timestamp").reset_index(drop=True)
+    cml_df_raw       = cml_df_raw.sort_values("timestamp").reset_index(drop=True)
+
+    all_ts = pd.to_datetime(raingauge_df_raw["timestamp"])
+    complete_ts_index = pd.date_range(
+        start=all_ts.min(), end=all_ts.max(), freq="15min"
     )
-    radar_df = radar_df.drop_duplicates(subset=["timestamp"], keep="first")
-    cml_df   = cml_df.drop_duplicates()
+    complete_df = pd.DataFrame({"timestamp": complete_ts_index})
+    T = len(complete_ts_index)
+    print(f"Complete 15-min grid: {T} timesteps "
+          f"({complete_ts_index[0]} → {complete_ts_index[-1]})")
+
+    # ------------------------------------------------------------------
+    # 3. Raingauge — left-join onto complete grid
+    #    Missing timestamps → NaN → handled by GaugeGraphNew.fill_heterodata
+    #    (notna() returns 0 for NaN rows, so validity flag is automatically 0)
+    # ------------------------------------------------------------------
+    raingauge_deduped = raingauge_df_raw.drop_duplicates("timestamp")
+    raingauge_df = complete_df.merge(raingauge_deduped, on="timestamp", how="left").reset_index(drop=True)
+
+    # ------------------------------------------------------------------
+    # 4. Radar — left-join, fill missing rows with zero arrays
+    #    Track which timestamps had real radar data for the validity flag.
+    # ------------------------------------------------------------------
+    radar_deduped = radar_df_raw.drop_duplicates("timestamp")
+    valid_radar_ts = set(pd.to_datetime(radar_deduped["timestamp"]))
+    radar_valid_flags = np.array(
+        [1.0 if ts in valid_radar_ts else 0.0 for ts in complete_ts_index],
+        dtype=np.float32,
+    )  # [T]
+
+    first_valid_data   = radar_deduped["data"].dropna().iloc[0]
+    zero_radar_array   = np.zeros_like(first_valid_data)
+
+    radar_full = complete_df.merge(radar_deduped, on="timestamp", how="left")
+    radar_full["data"] = [
+        v if isinstance(v, np.ndarray) else zero_radar_array.copy()
+        for v in radar_full["data"]
+    ]
+    radar_full["bounds"] = radar_full["bounds"].ffill().bfill()
+    radar_df = radar_full
+
+    print(f"Radar: {int(radar_valid_flags.sum())} / {T} timesteps have real data")
+
+    # ------------------------------------------------------------------
+    # 5. CML — expand to complete (timestamp × link × station) grid
+    #    A 'valid' column is added (1=real, 0=padded) and passes through
+    #    CMLGraph.prepare_tensor as an extra feature automatically.
+    # ------------------------------------------------------------------
+    cml_df = _expand_cml_to_dense_grid(cml_df_raw, complete_df)
+    print(f"CML expanded: {len(cml_df)} rows  "
+          f"({int(cml_df['valid'].sum())} real, "
+          f"{int((cml_df['valid'] == 0).sum())} padded)")
 
     print(f"raingauge_df : {raingauge_df.shape}")
     print(f"radar_df     : {radar_df.shape}")
     print(f"cml_df       : {cml_df.shape}")
 
-    # Timestamps aligned with the T dimension of all heterodata objects
-    timestamps = raingauge_df["timestamp"].values
-
     # ------------------------------------------------------------------
-    # Stratified spatial k-fold split
+    # 6. Stratified spatial k-fold split
     # ------------------------------------------------------------------
     split_info = stratified_spatial_kfold_dual(
         raingauge_station_mappings_df, seed=123, plot=False, n_splits=fold_count
     )
 
     # ------------------------------------------------------------------
-    # Build heterogeneous graphs (one per fold)
+    # 7. Build heterogeneous graphs (one per fold)
+    #    Radar validity flag is appended after RadarGraph builds its heterodata.
     # ------------------------------------------------------------------
     gauge_graph_arr = []
     for i in range(fold_count):
@@ -162,6 +264,15 @@ def train_st(config):
         if "radar" in datasources:
             radar_graph      = RadarGraph(radar_df)
             radar_heterodata = radar_graph.get_radar_heterodata()
+
+            # Append per-timestep validity flag as a second radar feature
+            # Shape: [N_radar, T, 1] → [N_radar, T, 2]
+            N_radar = radar_heterodata["radar"].x.shape[0]
+            valid_t = torch.tensor(radar_valid_flags).view(1, T, 1).expand(N_radar, -1, -1).clone()
+            radar_heterodata["radar"].x = torch.cat(
+                [radar_heterodata["radar"].x, valid_t], dim=-1
+            )
+
             gauge_graph.add_heterodata(
                 heterodata_layer=radar_heterodata,
                 coords=radar_graph.grid_coords,
@@ -180,24 +291,23 @@ def train_st(config):
         gauge_graph_arr.append(gauge_graph)
 
     # ------------------------------------------------------------------
-    # Build models (one per fold)
+    # 8. Build models — in_channels read dynamically from actual heterodata
+    #    so feature counts automatically reflect the added validity flags.
     # ------------------------------------------------------------------
-    raingauge_features = 6 if config["dataset_parameters"]["include_lpe"] else 2
-    hidden_channels    = config["model"]["hidden_channels"]
-    num_layers         = config["model"]["num_layers"]
-    out_channels       = 1
+    sample_hd = gauge_graph_arr[0].get_train_heterodata()
+    in_channels_dict = {
+        ntype: sample_hd[ntype].x.shape[2]
+        for ntype in sample_hd.node_types
+    }
+    print("in_channels_dict:", in_channels_dict)
 
-    if "cml" in datasources:
-        cml_features = gauge_graph_arr[0].get_train_heterodata()["cml"].x.shape[2]
+    hidden_channels = config["model"]["hidden_channels"]
+    num_layers      = config["model"]["num_layers"]
+    dropout         = config["model"].get("dropout", 0.0)
+    out_channels    = 1
 
     model_arr = []
     for i in range(fold_count):
-        in_channels_dict = {"raingauge": raingauge_features}
-        if "radar" in datasources:
-            in_channels_dict["radar"] = 1
-        if "cml" in datasources:
-            in_channels_dict["cml"] = cml_features
-
         model_arr.append(
             GNNInductiveHeteroST(
                 in_channels_dict=in_channels_dict,
@@ -208,11 +318,12 @@ def train_st(config):
                 window_size=window_size,
                 lstm_hidden=lstm_hidden,
                 lstm_layers=lstm_layers,
+                dropout=dropout,
             ).to(device=device)
         )
 
     # ------------------------------------------------------------------
-    # Build DataLoaders using SpatioTemporalDataset
+    # 9. Build DataLoaders using SpatioTemporalDataset
     # ------------------------------------------------------------------
     train_loader_arr = []
     val_loader_arr   = []
@@ -223,26 +334,19 @@ def train_st(config):
         val_data   = gauge_graph_arr[i].get_validation_heterodata()
         test_data  = gauge_graph_arr[i].get_test_heterodata()
 
-        # Compute normalisation stats from training split only
         stats = compute_norm_stats(train_data)
 
         train_dataset = SpatioTemporalDataset(
             apply_norm(train_data, stats),
-            timestamps,
             window_size=window_size,
-            max_gap_minutes=max_gap_minutes,
         )
         val_dataset = SpatioTemporalDataset(
             apply_norm(val_data, stats),
-            timestamps,
             window_size=window_size,
-            max_gap_minutes=max_gap_minutes,
         )
         test_dataset = SpatioTemporalDataset(
             apply_norm(test_data, stats),
-            timestamps,
             window_size=window_size,
-            max_gap_minutes=max_gap_minutes,
         )
 
         print(
@@ -261,13 +365,11 @@ def train_st(config):
         )
 
     # ------------------------------------------------------------------
-    # Training loop (per fold)
+    # 10. Training loop
     # ------------------------------------------------------------------
 
     def train_fold(model, train_loader, val_loader, fold, device="cpu"):
-        print(f"\n{'='*50}")
-        print(f"  FOLD {fold}  |  device: {device}")
-        print(f"{'='*50}")
+        print(f"\n{'='*50}\n  FOLD {fold}  |  device: {device}\n{'='*50}")
         first_param = next(model.parameters())
         print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
 
@@ -318,7 +420,6 @@ def train_st(config):
             epochs_run += 1
             print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}")
 
-            # Gradient norm diagnostics
             total_norm = sum(
                 p.grad.data.norm(2).item() ** 2
                 for p in model.parameters()
@@ -344,7 +445,7 @@ def train_st(config):
         plt.close()
 
     # ------------------------------------------------------------------
-    # Run all folds
+    # 11. Run all folds
     # ------------------------------------------------------------------
     fold_metrics = []
     for i in range(fold_count):
@@ -355,8 +456,6 @@ def train_st(config):
             fold=i,
             device=device,
         )
-
-        # Reload best checkpoint before testing
         model_arr[i].load_state_dict(
             torch.load(
                 f"experiments/{experiment_name}/weather_gnn_best_{i}.pth",
@@ -373,9 +472,6 @@ def train_st(config):
         )
         fold_metrics.append(metrics_dict)
 
-    # ------------------------------------------------------------------
-    # Average metrics across folds
-    # ------------------------------------------------------------------
     averaged = {
         key: float(np.mean([m[key] for m in fold_metrics]))
         for key in ["rmse", "mae", "pearson_r", "timestep_rmse",

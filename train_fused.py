@@ -96,6 +96,7 @@ def train_fused(config):
     hidden_channels = config['model']['hidden_channels']
     out_channels = 1
     num_layers = config['model']['num_layers']
+    dropout = config['model'].get('dropout', 0.0)
     model_arr = []
     raingauge_features = 6 if config['dataset_parameters']['include_lpe'] else 2
     for i in range(fold_count):
@@ -110,7 +111,8 @@ def train_fused(config):
               hidden_channels = hidden_channels,
               out_channels=out_channels,
               num_layers = num_layers,
-              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types
+              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types,
+              dropout=dropout,
             ).to(device=device)
           )
       else:
@@ -123,7 +125,8 @@ def train_fused(config):
               hidden_channels = hidden_channels,
               out_channels=out_channels,
               num_layers = num_layers,
-              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types
+              edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types,
+              dropout=dropout,
             ).to(device=device)
           )
 
