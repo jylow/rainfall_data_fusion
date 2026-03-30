@@ -53,6 +53,7 @@
     num_layers: 2, #hyper_param
     learning_rate: 0.001,
     weight_decay: 1e-4,
+    dropout: 0.0,         # dropout probability after each GNN layer; 0.0 = disabled
   },
 
   # Spatio-temporal parameters (used by train_st.py only; ignored by train_fused.py)
