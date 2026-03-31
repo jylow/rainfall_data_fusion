@@ -117,19 +117,28 @@ def train_epoch_st(
         num_graphs = batch["raingauge"].ptr.size(0) - 1
         num_nodes  = x.shape[0] // num_graphs
 
-        batch_loss = torch.tensor(0.0, device=device)
-        nodes_used = 0
-
+        # First pass: find valid node positions without running the model.
+        # Knowing the count upfront lets us scale each per-node loss before
+        # calling backward(), so gradients accumulate to the same value as a
+        # single averaged backward() — but only one computation graph lives
+        # in memory at a time instead of all num_nodes simultaneously.
+        valid_positions = []
         for node_pos in range(num_nodes):
-            # Global indices of this node across every graph in the batch
-            indices = torch.arange(num_graphs, device=device) * num_nodes + node_pos
-
-            # Only train on instances where this node has real data at time t
+            indices   = torch.arange(num_graphs, device=device) * num_nodes + node_pos
             valid_idx = _valid_node_indices(x, indices)
-            if valid_idx.numel() == 0:
-                continue  # all imputed — skip
+            if valid_idx.numel() > 0:
+                valid_positions.append((node_pos, indices, valid_idx))
 
-            # Mask current-timestep data features before forward pass
+        if not valid_positions:
+            continue  # entire batch is imputed — skip gradient step
+
+        scale          = 1.0 / len(valid_positions)
+        batch_loss_val = 0.0
+
+        # Second pass: one forward + backward per valid node position.
+        # Each backward frees its computation graph immediately, keeping
+        # peak GPU memory proportional to a single forward pass.
+        for node_pos, indices, valid_idx in valid_positions:
             x_masked = x.clone()
             x_masked[indices, :_DATA_FEATURE_DIM] = 0.0
 
@@ -146,19 +155,15 @@ def train_epoch_st(
             else:
                 loss = F.mse_loss(out["raingauge"][valid_idx], y[valid_idx])
 
-            batch_loss = batch_loss + loss
-            nodes_used += 1
+            (loss * scale).backward()
+            batch_loss_val += loss.item()
 
-        if nodes_used == 0:
-            continue  # entire batch is imputed — skip gradient step
-
-        batch_loss = batch_loss / nodes_used
-        batch_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        epoch_losses.append(batch_loss.item())
-        charge_bar.set_postfix({"loss": batch_loss.item()})
+        avg_loss = batch_loss_val / len(valid_positions)
+        epoch_losses.append(avg_loss)
+        charge_bar.set_postfix({"loss": avg_loss})
 
     return float(np.mean(epoch_losses)) if epoch_losses else float("nan")
 

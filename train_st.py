@@ -23,6 +23,8 @@ Key differences vs train_fused.py
 
 from src.sampling.main import stratified_spatial_kfold_dual  # must be first
 
+import gc
+
 import torch
 import os
 import time
@@ -257,122 +259,45 @@ def train_st(config):
     )
 
     # ------------------------------------------------------------------
-    # 7. Build heterogeneous graphs (one per fold)
-    #    Radar validity flag is appended after RadarGraph builds its heterodata.
+    # 7. Build shared heterodata for non-raingauge sources (once).
+    #    Radar and CML tensors are identical across all folds — only the
+    #    raingauge split masks differ.  Building them once and reusing the
+    #    same tensor objects avoids duplicating large arrays (e.g. radar
+    #    [N_radar, T, 2]) for each fold.
     # ------------------------------------------------------------------
-    gauge_graph_arr = []
-    for i in range(fold_count):
-        gauge_graph = GaugeGraphNew(
-            raingauge_df,
-            raingauge_station_mappings_df,
-            split_info=split_info[i],
-            knn=config["layer_connect"]["gauge_gauge"],
+    shared_radar_heterodata = None
+    shared_radar_coords     = None
+    shared_cml_heterodata   = None
+
+    if "radar" in datasources:
+        radar_graph             = RadarGraph(radar_df)
+        shared_radar_heterodata = radar_graph.get_radar_heterodata()
+        shared_radar_coords     = radar_graph.grid_coords
+
+        # Append per-timestep validity flag as a second radar feature.
+        # Use expand() without clone() — torch.cat materialises its own
+        # contiguous output, so no explicit copy is needed beforehand.
+        N_radar = shared_radar_heterodata["radar"].x.shape[0]
+        valid_t = torch.tensor(radar_valid_flags).view(1, T, 1).expand(N_radar, -1, -1)
+        shared_radar_heterodata["radar"].x = torch.cat(
+            [shared_radar_heterodata["radar"].x, valid_t], dim=-1
         )
-        if "radar" in datasources:
-            radar_graph      = RadarGraph(radar_df)
-            radar_heterodata = radar_graph.get_radar_heterodata()
+        del radar_graph, valid_t
+        print(f"Radar heterodata shape: {shared_radar_heterodata['radar'].x.shape}")
 
-            # Append per-timestep validity flag as a second radar feature
-            # Shape: [N_radar, T, 1] → [N_radar, T, 2]
-            N_radar = radar_heterodata["radar"].x.shape[0]
-            valid_t = torch.tensor(radar_valid_flags).view(1, T, 1).expand(N_radar, -1, -1).clone()
-            radar_heterodata["radar"].x = torch.cat(
-                [radar_heterodata["radar"].x, valid_t], dim=-1
-            )
-
-            gauge_graph.add_heterodata(
-                heterodata_layer=radar_heterodata,
-                coords=radar_graph.grid_coords,
-                layer_name="radar",
-                knn=config["layer_connect"]["radar_gauge"],
-            )
-        if "cml" in datasources:
-            cml_graph      = CMLGraph(cml_df, cml_coordinates_df)
-            cml_heterodata = cml_graph.get_heterodata()
-            gauge_graph.add_heterodata(
-                heterodata_layer=cml_heterodata,
-                coords=cml_coordinates_df,
-                layer_name="cml",
-                knn=config["layer_connect"]["cml_gauge"],
-            )
-        gauge_graph_arr.append(gauge_graph)
-
-    # ------------------------------------------------------------------
-    # 8. Build models — in_channels read dynamically from actual heterodata
-    #    so feature counts automatically reflect the added validity flags.
-    # ------------------------------------------------------------------
-    sample_hd = gauge_graph_arr[0].get_train_heterodata()
-    in_channels_dict = {
-        ntype: sample_hd[ntype].x.shape[2]
-        for ntype in sample_hd.node_types
-    }
-    print("in_channels_dict:", in_channels_dict)
+    if "cml" in datasources:
+        cml_graph             = CMLGraph(cml_df, cml_coordinates_df)
+        shared_cml_heterodata = cml_graph.get_heterodata()
+        del cml_graph
 
     hidden_channels = config["model"]["hidden_channels"]
     num_layers      = config["model"]["num_layers"]
     dropout         = config["model"].get("dropout", 0.0)
     out_channels    = 1
 
-    model_arr = []
-    for i in range(fold_count):
-        model_arr.append(
-            GNNInductiveHeteroST(
-                in_channels_dict=in_channels_dict,
-                hidden_channels=hidden_channels,
-                out_channels=out_channels,
-                num_layers=num_layers,
-                edge_types=gauge_graph_arr[i].get_train_heterodata().edge_types,
-                window_size=window_size,
-                lstm_hidden=lstm_hidden,
-                lstm_layers=lstm_layers,
-                dropout=dropout,
-            ).to(device=device)
-        )
-
     # ------------------------------------------------------------------
-    # 9. Build DataLoaders using SpatioTemporalDataset
-    # ------------------------------------------------------------------
-    train_loader_arr = []
-    val_loader_arr   = []
-    test_loader_arr  = []
-
-    for i in range(fold_count):
-        train_data = gauge_graph_arr[i].get_train_heterodata()
-        val_data   = gauge_graph_arr[i].get_validation_heterodata()
-        test_data  = gauge_graph_arr[i].get_test_heterodata()
-
-        stats = compute_norm_stats(train_data)
-
-        train_dataset = SpatioTemporalDataset(
-            apply_norm(train_data, stats),
-            window_size=window_size,
-        )
-        val_dataset = SpatioTemporalDataset(
-            apply_norm(val_data, stats),
-            window_size=window_size,
-        )
-        test_dataset = SpatioTemporalDataset(
-            apply_norm(test_data, stats),
-            window_size=window_size,
-        )
-
-        print(
-            f"Fold {i}  —  train: {len(train_dataset)} windows, "
-            f"val: {len(val_dataset)}, test: {len(test_dataset)}"
-        )
-
-        train_loader_arr.append(
-            GeometricDataLoader(train_dataset, batch_size=batch_size, shuffle=False)
-        )
-        val_loader_arr.append(
-            GeometricDataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-        )
-        test_loader_arr.append(
-            GeometricDataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-        )
-
-    # ------------------------------------------------------------------
-    # 10. Training loop
+    # 8. Training helper (defined here so it closes over experiment_name,
+    #    config, perf, etc.)
     # ------------------------------------------------------------------
 
     def train_fold(model, train_loader, val_loader, fold, device="cpu"):
@@ -452,32 +377,122 @@ def train_st(config):
         plt.close()
 
     # ------------------------------------------------------------------
-    # 11. Run all folds
+    # 9. Process one fold at a time.
+    #    Build the gauge graph, model, and DataLoaders; train; test; then
+    #    explicitly delete everything and call gc.collect() /
+    #    torch.cuda.empty_cache() before the next fold.  Only one fold's
+    #    data is in memory at a time.
     # ------------------------------------------------------------------
-    fold_metrics = []
+    fold_metrics    = []
+    in_channels_dict = None
+
     for i in range(fold_count):
-        train_fold(
-            model_arr[i],
-            train_loader=train_loader_arr[i],
-            val_loader=val_loader_arr[i],
-            fold=i,
-            device=device,
+        print(f"\n{'='*60}\n  Building graph for fold {i} / {fold_count - 1}\n{'='*60}")
+
+        # Build raingauge graph for this fold only
+        gauge_graph = GaugeGraphNew(
+            raingauge_df,
+            raingauge_station_mappings_df,
+            split_info=split_info[i],
+            knn=config["layer_connect"]["gauge_gauge"],
         )
-        model_arr[i].load_state_dict(
+        if shared_radar_heterodata is not None:
+            gauge_graph.add_heterodata(
+                heterodata_layer=shared_radar_heterodata,
+                coords=shared_radar_coords,
+                layer_name="radar",
+                knn=config["layer_connect"]["radar_gauge"],
+            )
+        if shared_cml_heterodata is not None:
+            gauge_graph.add_heterodata(
+                heterodata_layer=shared_cml_heterodata,
+                coords=cml_coordinates_df,
+                layer_name="cml",
+                knn=config["layer_connect"]["cml_gauge"],
+            )
+
+        # Extract in_channels_dict from the first fold only — feature dims
+        # are fold-independent (only the split mask changes between folds).
+        if in_channels_dict is None:
+            sample_hd = gauge_graph.get_train_heterodata()
+            in_channels_dict = {
+                ntype: sample_hd[ntype].x.shape[2]
+                for ntype in sample_hd.node_types
+            }
+            print("in_channels_dict:", in_channels_dict)
+
+        # Build a fresh model for this fold
+        model = GNNInductiveHeteroST(
+            in_channels_dict=in_channels_dict,
+            hidden_channels=hidden_channels,
+            out_channels=out_channels,
+            num_layers=num_layers,
+            edge_types=gauge_graph.get_train_heterodata().edge_types,
+            window_size=window_size,
+            lstm_hidden=lstm_hidden,
+            lstm_layers=lstm_layers,
+            dropout=dropout,
+        ).to(device=device)
+
+        # Build DataLoaders
+        train_data = gauge_graph.get_train_heterodata()
+        val_data   = gauge_graph.get_validation_heterodata()
+        test_data  = gauge_graph.get_test_heterodata()
+
+        stats = compute_norm_stats(train_data)
+
+        train_dataset = SpatioTemporalDataset(
+            apply_norm(train_data, stats),
+            window_size=window_size,
+        )
+        val_dataset = SpatioTemporalDataset(
+            apply_norm(val_data, stats),
+            window_size=window_size,
+        )
+        test_dataset = SpatioTemporalDataset(
+            apply_norm(test_data, stats),
+            window_size=window_size,
+        )
+
+        print(
+            f"Fold {i}  —  train: {len(train_dataset)} windows, "
+            f"val: {len(val_dataset)}, test: {len(test_dataset)}"
+        )
+
+        # Drop the un-normalised references; datasets hold their own copies.
+        del train_data, val_data, test_data
+
+        train_loader = GeometricDataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+        val_loader   = GeometricDataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
+        test_loader  = GeometricDataLoader(test_dataset,  batch_size=batch_size, shuffle=False)
+
+        # Train
+        train_fold(model, train_loader, val_loader, fold=i, device=device)
+
+        # Load best weights and evaluate
+        model.load_state_dict(
             torch.load(
                 f"experiments/{experiment_name}/weather_gnn_best_{i}.pth",
                 map_location=device,
             )
         )
         metrics_dict = test_model_st(
-            model_arr[i],
+            model,
             raingauge_station_mappings_df,
-            test_loader_arr[i],
+            test_loader,
             device,
             fold=i,
             experiment_name=experiment_name,
         )
         fold_metrics.append(metrics_dict)
+
+        # Free this fold's allocations before the next iteration
+        del gauge_graph, model
+        del train_dataset, val_dataset, test_dataset
+        del train_loader, val_loader, test_loader
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     averaged = {
         key: float(np.mean([m[key] for m in fold_metrics]))
