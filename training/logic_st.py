@@ -364,6 +364,7 @@ def test_model_st(
             "mae":         m["mae"],
             "rmse":        m["rmse"],
             "bias":        m["bias"],
+            "pearson_r":   m["pearson_r"],
             "precision":   m["precision"],
             "recall":      m["recall"],
             "f1":          m["f1"],

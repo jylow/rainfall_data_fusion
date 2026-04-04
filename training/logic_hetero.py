@@ -306,6 +306,7 @@ def test_model(
             "mae": m["mae"],
             "rmse": m["rmse"],
             "bias": m["bias"],
+            "pearson_r": m["pearson_r"],
             "precision": m["precision"],
             "recall": m["recall"],
             "f1": m["f1"],
@@ -540,10 +541,18 @@ def compute_per_station_metrics(
         bias = float(np.mean(p - t))          # positive → over-prediction
         cls = compute_binary_classification_metrics(p, t, threshold=threshold)
 
+        valid = (~np.isnan(p)) & (~np.isnan(t))
+        if valid.sum() > 2:
+            r, _ = pearsonr(t[valid], p[valid])
+            r = float(r)
+        else:
+            r = float('nan')
+
         results[int(sid)] = {
             "mae": mae,
             "rmse": rmse,
             "bias": bias,
+            "pearson_r": r,
             **cls,
         }
 
