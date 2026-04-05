@@ -2,6 +2,7 @@ from src.sampling.main import stratified_spatial_kfold_dual #Dont know why but t
 
 import torch
 import os
+import shutil
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -35,6 +36,7 @@ def train_fused(config):
 # 2. Set up experiment folder
     experiment_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_new"
     os.makedirs(f"experiments/{experiment_name}", exist_ok=True)
+    shutil.copy("config.yaml", f"experiments/{experiment_name}/config.yaml")
     perf = PerformanceLogger(f"experiments/{experiment_name}/training_log.jsonl")
 
 

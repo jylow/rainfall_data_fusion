@@ -27,6 +27,7 @@ import gc
 
 import torch
 import os
+import shutil
 import time
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -165,6 +166,7 @@ def train_st(config):
     # ------------------------------------------------------------------
     experiment_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_st"
     os.makedirs(f"experiments/{experiment_name}", exist_ok=True)
+    shutil.copy("config.yaml", f"experiments/{experiment_name}/config.yaml")
     perf = PerformanceLogger(f"experiments/{experiment_name}/training_log.jsonl")
 
     # ------------------------------------------------------------------
