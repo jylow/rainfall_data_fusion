@@ -59,15 +59,22 @@ def train_epoch(
             if hasattr(batch[edge_type], 'edge_attr')
         }
 
-        batch_loss = torch.tensor(0.0, device=device)
+        # Per-node-position backward (mirrors logic_st.py).
+        # Calling backward() immediately after each forward pass frees that
+        # computation graph before the next forward pass is created, so peak
+        # GPU memory is proportional to ONE forward pass rather than to
+        # num_nodes forward passes held simultaneously.  Gradients accumulate
+        # in p.grad across iterations — equivalent to the single accumulated
+        # backward but at a fraction of the memory cost.
+        scale = 1.0 / num_nodes
+        batch_loss_val = 0.0
+
         for node_pos in range(num_nodes):
             x_masked = x.clone()
-            indices_to_mask = torch.arange(num_graphs, device=device) * x.shape[0] // num_graphs + node_pos
+            indices_to_mask = torch.arange(num_graphs, device=device) * num_nodes + node_pos
             x_masked[indices_to_mask, :_DATA_FEATURE_DIM] = 0  # zero data features only; preserve LPE
 
-            x_dict = {}
-            for nodetype in batch.node_types:
-                x_dict[nodetype] = batch[nodetype].x
+            x_dict = {ntype: batch[ntype].x for ntype in batch.node_types}
             x_dict['raingauge'] = x_masked
 
             out = model(x_dict, edge_index_dict, edge_attr_dict)
@@ -77,19 +84,15 @@ def train_epoch(
                 loss = weighted_mse(out['raingauge'][indices_to_mask], y[indices_to_mask], alpha=weighted_loss_alpha)
             else:
                 loss = F.mse_loss(out['raingauge'][indices_to_mask], y[indices_to_mask])
-            batch_loss += loss
 
+            (loss * scale).backward()   # frees this graph immediately
+            batch_loss_val += loss.item()
 
-        batch_loss = batch_loss / num_nodes
-        batch_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
-        epoch_losses.append(batch_loss.item())
-        charge_bar.set_postfix(
-            {
-                "loss": batch_loss.item(),
-            }
-        )
+        avg_loss = batch_loss_val / num_nodes
+        epoch_losses.append(avg_loss)
+        charge_bar.set_postfix({"loss": avg_loss})
         optimizer.step()
         if scheduler is not None:
             scheduler.step()
@@ -139,8 +142,9 @@ def validate(
                 x_dict[nodetype] = batch[nodetype].x
             x_dict['raingauge'] = x_masked
 
-            # Forward pass
+            # Forward pass; clamp to >= 0 since rainfall cannot be negative.
             out = model(x_dict, edge_index_dict, edge_attr_dict)  # [B*N, out_channels]
+            out['raingauge'] = out['raingauge'].clamp(min=0.0)
 
             if weighted_loss_alpha > 0.0:
                 loss = weighted_mse(out['raingauge'][val_mask], y[val_mask], alpha=weighted_loss_alpha)
@@ -214,6 +218,7 @@ def test_model(
 
             # ----- Model forward -----
             out = model(x_dict, edge_index, edge_attr_dict)
+            out['raingauge'] = out['raingauge'].clamp(min=0.0)  # rainfall >= 0
 
             # ----- Compute test loss -----
             loss = F.mse_loss(out['raingauge'][mask], y[mask])

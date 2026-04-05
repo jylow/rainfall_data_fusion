@@ -43,6 +43,13 @@ def train_fused(config):
     start_year = config['dataset_parameters']['start_year']
     end_year = config['dataset_parameters']['end_year']
     raingauge_df, raingauge_station_mappings_df = load_raingauge_dataset(start = start_year, end = end_year, uptime_threshold=uptime_threshold)
+
+    # Raingauge data is at 5-min intervals; radar/CML are at 15-min.
+    # Resample to 15-min averages before the inner join so timestamps align
+    # and readings represent the correct accumulation period.
+    raingauge_df = raingauge_df.resample('15min', closed='left', label='left').mean()
+    raingauge_df = raingauge_df[raingauge_df.index.minute % 15 == 0]
+
     radar_df = load_processed_dataset("database/processed_radar_dataset.pkl")
 #radar_df = load_radar_dataset(folder_name='database/sg_radar_data_cropped', cropped=True)
 

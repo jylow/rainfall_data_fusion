@@ -323,8 +323,12 @@ class GNNInductiveHetero(torch.nn.Module):
             )
             h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 
+        # No output activation: allow any real value during training so that
+        # MSE gradients never vanish (softplus saturates for large-negative
+        # linear outputs, killing gradients during dry periods).
+        # Clamp to >= 0 happens in test_model / validate at evaluation time.
         out_dict = {
-            'raingauge': F.softplus(self.lin(h_dict['raingauge'])),
+            'raingauge': self.lin(h_dict['raingauge']),
         }
 
         return out_dict

@@ -189,6 +189,12 @@ def train_st(config):
     #    heterodata, causing the context-window slicing in SpatioTemporalDataset
     #    to pick up non-chronological steps and silently produce wrong windows.
     # ------------------------------------------------------------------
+    # Raingauge data is at 5-min intervals; radar/CML are at 15-min.
+    # Resample to 15-min averages while the timestamp is still the index,
+    # then promote it to a column for the subsequent left-join.
+    raingauge_df_raw = raingauge_df_raw.resample('15min', closed='left', label='left').mean()
+    raingauge_df_raw = raingauge_df_raw[raingauge_df_raw.index.minute % 15 == 0]
+
     # raingauge_df_raw comes from pivot(index="timestamp"), so timestamp is the
     # index, not a column.  reset_index() promotes it to a column so that
     # sort_values and the subsequent left-join on "timestamp" both work.

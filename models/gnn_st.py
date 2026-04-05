@@ -153,4 +153,6 @@ class GNNInductiveHeteroST(nn.Module):
             h_dict = conv(h_dict, edge_index_dict, edge_weight_dict=edge_attr_dict)
             h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 
-        return {"raingauge": F.softplus(self.lin(h_dict["raingauge"]))}
+        # No output activation — allows gradients to flow freely during training.
+        # Clamp to >= 0 is applied in the validation/test loops.
+        return {"raingauge": self.lin(h_dict["raingauge"])}

@@ -218,6 +218,7 @@ def validate_st(
             x_dict["raingauge"] = x_masked
 
             out = model(x_dict, x_context_dict, edge_index_dict, edge_attr_dict)
+            out["raingauge"] = out["raingauge"].clamp(min=0.0)  # rainfall >= 0
 
             if weighted_loss_alpha > 0.0:
                 loss = weighted_mse(
@@ -293,6 +294,7 @@ def test_model_st(
             x_dict["raingauge"] = x_masked
 
             out = model(x_dict, x_context_dict, edge_index_dict, edge_attr_dict)
+            out["raingauge"] = out["raingauge"].clamp(min=0.0)  # rainfall >= 0
 
             all_preds.append(out["raingauge"][eval_mask].detach().cpu())
             all_targets.append(y[eval_mask].detach().cpu())
