@@ -7,7 +7,7 @@ from torch.linalg import vector_norm
 import torch.nn.functional as F
 
 import torch_geometric.transforms as T
-from torch_geometric.nn import SAGEConv, GINEConv, to_hetero, HeteroConv, GCNConv, GATConv, Linear, GraphConv
+from torch_geometric.nn import SAGEConv, GINEConv, to_hetero, HeteroConv, GCNConv, GATConv, GATv2Conv, Linear, GraphConv
 
 class HeteroGNN(torch.nn.Module):
     def __init__(self, hidden_channels, out_channels, num_layers):
@@ -273,16 +273,15 @@ class GNNInductive(torch.nn.Module):
         return out
 
 class GNNInductiveHetero(torch.nn.Module):
-    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers, edge_types, dropout=0.0):
+    def __init__(self, in_channels_dict, hidden_channels, out_channels, num_layers, edge_types, dropout=0.0, cml_edge_dim=None):
         """
         Args:
-            in_channels_dict: dict
-                {
-                    'raingauge': F_g,
-                    'radar': F_r
-                }
-            dropout: dropout probability applied after each GNN layer's activation.
-                     0.0 disables dropout entirely.
+            in_channels_dict: dict  e.g. {'raingauge': F_g, 'radar': F_r}
+            cml_edge_dim    : int or None.  When set, CML links are represented
+                              as raingauge-raingauge edges with this many static
+                              features, processed by GATv2Conv.  When None (default)
+                              node-mode GraphConv is used for all edge types.
+            dropout         : dropout probability after each GNN layer; 0.0 = off.
         """
         super().__init__()
 
@@ -293,6 +292,7 @@ class GNNInductiveHetero(torch.nn.Module):
             num_layers=num_layers,
         )
         self.dropout = nn.Dropout(p=dropout)
+        self.cml_edge_dim = cml_edge_dim
 
         self.convs = torch.nn.ModuleList()
 
@@ -305,7 +305,16 @@ class GNNInductiveHetero(torch.nn.Module):
             else:
                 conv_dict = {}
                 for edge_type in edge_types:
-                    conv_dict[edge_type] = GraphConv((-1, -1), hidden_channels)
+                    _, rel, _ = edge_type
+                    if rel == 'cml_link' and cml_edge_dim is not None:
+                        conv_dict[edge_type] = GATv2Conv(
+                            (-1, -1), hidden_channels,
+                            heads=1, concat=False,
+                            edge_dim=cml_edge_dim,
+                            add_self_loops=False,
+                        )
+                    else:
+                        conv_dict[edge_type] = GraphConv((-1, -1), hidden_channels)
                 conv = HeteroConv(conv_dict, aggr='mean')
 
             self.convs.append(conv)
@@ -316,10 +325,21 @@ class GNNInductiveHetero(torch.nn.Module):
         h_dict = x_dict
 
         for conv in self.convs:
+            # GraphConv takes scalar edge_weight; GATv2Conv takes vector edge_attr.
+            # Split so each conv type receives the correct kwarg.
+            scalar_weights = {
+                et: ea for et, ea in edge_attr_dict.items()
+                if et[1] != 'cml_link' or self.cml_edge_dim is None
+            }
+            vector_attrs = {
+                et: ea for et, ea in edge_attr_dict.items()
+                if et[1] == 'cml_link' and self.cml_edge_dim is not None
+            }
             h_dict = conv(
                 h_dict,
                 edge_index_dict,
-                edge_weight_dict=edge_attr_dict,
+                edge_weight_dict=scalar_weights,
+                edge_attr_dict=vector_attrs,
             )
             h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 

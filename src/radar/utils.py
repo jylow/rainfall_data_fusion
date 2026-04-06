@@ -15,63 +15,106 @@ class RadarDataObject:
         self.crs = crs
         self.transform = transform
 
-def process_radar_dataset(folder_name: str, crop_bounds: dict)-> pd.DataFrame:
+def process_radar_dataset(folder_name: str, crop_bounds: dict) -> pd.DataFrame:
     """
-    Process the radar dataset by consolidating data and cropping the data.
+    Process the radar dataset by consolidating data and cropping to crop_bounds.
 
-    The bounds should be in an array (left, bottom, right, top)
+    All frames are resampled to a single consistent pixel grid derived from the
+    first valid file so that every row in the output has the same array shape,
+    transform, and bounds — regardless of per-file resolution differences.
+
+    Parameters
+    ----------
+    folder_name  : str   path to folder containing date subfolders with .tif files
+    crop_bounds  : dict  {'left', 'right', 'top', 'bottom'} in the CRS of the TIFs
     """
-    df = pd.DataFrame()
+    from scipy.ndimage import zoom as ndimage_zoom
 
-    tif_folder_path = folder_name
-    for subdir, dirs, files in os.walk(tif_folder_path):
-        for dir in dirs:
-            path = os.path.join(tif_folder_path, dir)
-            for filename in os.listdir(path):
-                if filename.endswith(".tif"):
-                    timestamp = filename.split("_")[2]
-                    timestamp = datetime.strptime(timestamp, "%Y%m%d%H%M")
-                    data, bounds, crs, transform = read_tif_file(
-                        os.path.join(path, filename)
-                    )
+    target_shape = (31, 50)   # (rows, cols) fixed from the first valid file
+    rows = []
 
-                    #cropping
-                    col_start = int((crop_bounds['left'] - bounds.left) // transform[0])
-                    col_end = int((crop_bounds['right'] - bounds.left) // transform[0])
-                    row_start = int((bounds.top - crop_bounds['top']) // -transform[4])
-                    row_end = int((bounds.top - crop_bounds['bottom']) // -transform[4])
+    for subdir, dirs, files in os.walk(folder_name):
+        for dir_name in sorted(dirs):
+            path = os.path.join(folder_name, dir_name)
+            for filename in sorted(os.listdir(path)):
+                if not filename.endswith(".tif"):
+                    continue
 
-                    new_bounds_left = bounds.left + transform[0] * col_start
-                    new_bounds_right = bounds.left + transform[0] * col_end
-                    new_bounds_top = bounds.top + transform[4] * row_start
-                    new_bounds_bottom = bounds.top + transform[4] * row_end
-                    new_bounding_box = BoundingBox(left = new_bounds_left,
-                                                   right = new_bounds_right,
-                                                   top = new_bounds_top,
-                                                   bottom = new_bounds_bottom)
+                timestamp = datetime.strptime(filename.split("_")[2], "%Y%m%d%H%M")
+                # Radar files are in UTC — convert to Singapore Time (UTC+8)
+                timestamp = timestamp + pd.Timedelta(hours=8)
+                data, bounds, crs, transform = read_tif_file(
+                    os.path.join(path, filename)
+                )
 
-                    new_transform = from_bounds(new_bounds_left,
-                                             new_bounds_bottom,
-                                             new_bounds_right,
-                                             new_bounds_top, (new_bounds_right - new_bounds_left) * 10, (new_bounds_top - new_bounds_bottom) * 10)
+                # ── Pixel indices for the crop region ──────────────────────
+                # Use round() to snap to the nearest pixel; avoids off-by-one
+                # errors when crop_bounds don't fall exactly on pixel edges.
+                col_start = round((crop_bounds['left']   - bounds.left) / transform[0])
+                col_end   = round((crop_bounds['right']  - bounds.left) / transform[0])
+                row_start = round((bounds.top - crop_bounds['top'])    / (-transform[4]))
+                row_end   = round((bounds.top - crop_bounds['bottom']) / (-transform[4]))
 
-                    data = data[row_start:row_end, col_start: col_end]
-                    #print(data.shape)
-                    #print(new_bounding_box)
-                    #print(new_transform)
+                # Clamp to valid array extents
+                col_start = max(0, min(col_start, data.shape[1]))
+                col_end   = max(0, min(col_end,   data.shape[1]))
+                row_start = max(0, min(row_start, data.shape[0]))
+                row_end   = max(0, min(row_end,   data.shape[0]))
 
-                    new_row = pd.DataFrame(
-                        {
-                            "timestamp": [timestamp],
-                            "data": [data],
-                            "bounds": [new_bounding_box],
-                            "crs": [crs],
-                            "transform": [new_transform],
-                        }
-                    )
-                    df = pd.concat([df, new_row], ignore_index=True)
+                if col_end <= col_start or row_end <= row_start:
+                    print(f"  Skipping {filename}: crop region outside raster extent.")
+                    continue
 
+                cropped = data[row_start:row_end, col_start:col_end].astype(float)
+
+                # ── Fix resolution differences across timestamps ────────────
+                # Lock target_shape from the first valid file.  Any file with a
+                # different pixel count (bad resolution) is resampled to match.
+                if target_shape is None:
+                    target_shape = cropped.shape
+                    print(f"Target shape set to {target_shape} from {filename}")
+
+                if cropped.shape != target_shape:
+                    print(f"  Resampling {filename}: {cropped.shape} → {target_shape}")
+                    zoom_r = target_shape[0] / cropped.shape[0]
+                    zoom_c = target_shape[1] / cropped.shape[1]
+                    cropped = ndimage_zoom(cropped, (zoom_r, zoom_c), order=1)
+
+                # ── Consistent bounds and transform for all frames ──────────
+                # Use pixel-snapped bounds (derived from actual col/row indices)
+                # rather than crop_bounds directly.  crop_bounds may not fall on
+                # a pixel boundary (e.g. bottom=1.188 snaps to 1.19 at 0.01°
+                # resolution), so using crop_bounds would make the stored bounds
+                # disagree with the actual data coverage.
+                snapped_left   = bounds.left + transform[0] * col_start
+                snapped_right  = bounds.left + transform[0] * col_end
+                snapped_top    = bounds.top  + transform[4] * row_start
+                snapped_bottom = bounds.top  + transform[4] * row_end
+
+                new_bounding_box = BoundingBox(
+                    left   = snapped_left,
+                    right  = snapped_right,
+                    top    = snapped_top,
+                    bottom = snapped_bottom,
+                )
+                # from_bounds(west, south, east, north, width_px, height_px)
+                new_transform = from_bounds(
+                    snapped_left,  snapped_bottom,
+                    snapped_right, snapped_top,
+                    target_shape[1], target_shape[0],
+                )
+
+                rows.append({
+                    "timestamp": timestamp,
+                    "data":      cropped,
+                    "bounds":    new_bounding_box,
+                    "crs":       crs,
+                    "transform": new_transform,
+                })
+
+    df = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
     df.to_pickle("database/processed_radar_dataset.pkl")
+    print(f"Saved {len(df)} radar frames to database/processed_radar_dataset.pkl  (shape {target_shape})")
     return df
 
 def load_processed_dataset(folder_name: str) -> pd.DataFrame | pd.Series:

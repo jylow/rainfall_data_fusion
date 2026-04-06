@@ -29,7 +29,7 @@ Notes
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import HeteroConv, GraphConv
+from torch_geometric.nn import HeteroConv, GraphConv, GATv2Conv
 
 
 class GNNInductiveHeteroST(nn.Module):
@@ -61,6 +61,7 @@ class GNNInductiveHeteroST(nn.Module):
         lstm_hidden: int = 32,
         lstm_layers: int = 1,
         dropout: float = 0.0,
+        cml_edge_dim: int | None = None,
     ):
         super().__init__()
 
@@ -68,6 +69,7 @@ class GNNInductiveHeteroST(nn.Module):
         self.lstm_hidden = lstm_hidden
         self.node_types = list(in_channels_dict.keys())
         self.dropout = nn.Dropout(p=dropout)
+        self.cml_edge_dim = cml_edge_dim
 
         # ------------------------------------------------------------------
         # 1. LSTM encoders — one per node type
@@ -99,7 +101,18 @@ class GNNInductiveHeteroST(nn.Module):
         # ------------------------------------------------------------------
         self.convs = nn.ModuleList()
         for _ in range(num_layers):
-            conv_dict = {et: GraphConv((-1, -1), hidden_channels) for et in edge_types}
+            conv_dict = {}
+            for et in edge_types:
+                _, rel, _ = et
+                if rel == 'cml_link' and cml_edge_dim is not None:
+                    conv_dict[et] = GATv2Conv(
+                        (-1, -1), hidden_channels,
+                        heads=1, concat=False,
+                        edge_dim=cml_edge_dim,
+                        add_self_loops=False,
+                    )
+                else:
+                    conv_dict[et] = GraphConv((-1, -1), hidden_channels)
             self.convs.append(HeteroConv(conv_dict, aggr="mean"))
 
         # ------------------------------------------------------------------
@@ -149,8 +162,22 @@ class GNNInductiveHeteroST(nn.Module):
             h_dict[ntype] = self.dropout(F.relu(self.input_proj[ntype](x_aug)))  # [B*N, hidden_channels]
 
         # ---- GNN message-passing ----
+        # GraphConv takes scalar edge_weight; GATv2Conv takes vector edge_attr.
+        # Split so each conv type receives the correct kwarg.
         for conv in self.convs:
-            h_dict = conv(h_dict, edge_index_dict, edge_weight_dict=edge_attr_dict)
+            scalar_weights = {
+                et: ea for et, ea in edge_attr_dict.items()
+                if et[1] != 'cml_link' or self.cml_edge_dim is None
+            }
+            vector_attrs = {
+                et: ea for et, ea in edge_attr_dict.items()
+                if et[1] == 'cml_link' and self.cml_edge_dim is not None
+            }
+            h_dict = conv(
+                h_dict, edge_index_dict,
+                edge_weight_dict=scalar_weights,
+                edge_attr_dict=vector_attrs,
+            )
             h_dict = {k: self.dropout(F.relu(v)) for k, v in h_dict.items()}
 
         # No output activation — allows gradients to flow freely during training.

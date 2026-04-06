@@ -31,6 +31,7 @@ def train_fused(config):
     batch_size = config['training_params']['batch_size']
     fold_count = config['training_params']['fold_count']
     datasources = config['datasources']
+    cml_mode = config['model'].get('cml_mode', 'node')
 
 
 # 2. Set up experiment folder
@@ -95,33 +96,44 @@ def train_fused(config):
       if 'cml' in datasources:
         cml_graph = CMLGraph(cml_df, cml_coordinates_df)
         cml_heterodata = cml_graph.get_heterodata()
-        gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml', knn=config['layer_connect']['cml_gauge'])
+        link_features = cml_graph.get_link_static_features() if cml_mode == 'edge' else None
+        gauge_graph.add_heterodata(heterodata_layer=cml_heterodata, coords=cml_coordinates_df, layer_name='cml', knn=config['layer_connect']['cml_gauge'], link_features=link_features)
       gauge_graph_arr.append(gauge_graph)
 
 
 # 7. Initialise HGNN model
-    if 'cml' in datasources:
-        cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
     hidden_channels = config['model']['hidden_channels']
     out_channels = 1
     num_layers = config['model']['num_layers']
     dropout = config['model'].get('dropout', 0.0)
-    model_arr = []
     raingauge_features = 6 if config['dataset_parameters']['include_lpe'] else 2
+
+    if 'cml' in datasources:
+        if cml_mode == 'node':
+            cml_features = gauge_graph_arr[0].get_train_heterodata()['cml'].x.shape[2]
+            in_channels_base = {"raingauge": raingauge_features, "radar": 1, "cml": cml_features}
+            cml_edge_dim = None
+        else:  # 'edge'
+            in_channels_base = {"raingauge": raingauge_features, "radar": 1}
+            sample_ea = gauge_graph_arr[0].get_train_heterodata()[
+                'raingauge', 'cml_link', 'raingauge'].edge_attr
+            cml_edge_dim = sample_ea.shape[1]  # [E, F_static]
+    else:
+        in_channels_base = {"raingauge": raingauge_features, "radar": 1}
+        cml_edge_dim = None
+
+    model_arr = []
     for i in range(fold_count):
       if 'cml' in datasources:
           model_arr.append(
             GNNInductiveHetero(
-              in_channels_dict = {
-                "raingauge": raingauge_features,
-                "radar": 1,
-                "cml": cml_features
-              },
+              in_channels_dict = in_channels_base,
               hidden_channels = hidden_channels,
               out_channels=out_channels,
               num_layers = num_layers,
               edge_types = gauge_graph_arr[i].get_train_heterodata().edge_types,
               dropout=dropout,
+              cml_edge_dim=cml_edge_dim,
             ).to(device=device)
           )
       else:
@@ -200,7 +212,12 @@ def train_fused(config):
         first_param = next(model.parameters())
         print(f"Initial weight sample: {first_param.data.flatten()[:5]}")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=(config['model']['learning_rate']), weight_decay=float(config['model']['weight_decay']))
+        optimizer = torch.optim.Adam(model.parameters(), lr=float(config['model']['learning_rate']), weight_decay=float(config['model']['weight_decay']))
+        # Halve lr when val loss stops improving for 3 consecutive epochs.
+        # This lets the model keep refining past the initial fast-drop plateau.
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=3, min_lr=1e-6
+        )
         training_loss_arr = []
         validation_loss_arr = []
         early = 0
@@ -214,9 +231,6 @@ def train_fused(config):
             epoch_start = time.time()
             print(f"-----EPOCH: {i + 1}-----")
 
-            # CHECK 2: Print weight before training
-            #weight_before = first_param.data.clone()
-
             weighted_alpha = config['training_params'].get('weighted_loss_alpha', 0.0)
             train_loss = train_epoch(
                 model,
@@ -225,9 +239,9 @@ def train_fused(config):
                 device,
                 weighted_loss_alpha=weighted_alpha,
             )
-            print(train_loss)
 
             validation_loss = validate(model, val_loader, device, weighted_loss_alpha=weighted_alpha)
+            scheduler.step(validation_loss)
             training_loss_arr.append(train_loss)
             validation_loss_arr.append(validation_loss)
             perf.log_epoch(i, train_loss, validation_loss)
@@ -242,21 +256,13 @@ def train_fused(config):
                 early += 1
             epochs += 1
             if early >= stopping_condition:
-                print("Early stop loss")
+                print("Early stop triggered")
                 break
 
-            print(f"Train Loss: {train_loss:.4f}")
-            print(f"Validation Loss: {validation_loss:.4f}")
-
-            # CHECK 4: Print gradient norms
-            total_norm = 0
-            for p in model.parameters():
-                if p.grad is not None:
-                    total_norm += p.grad.data.norm(2).item() ** 2
-            total_norm = total_norm**0.5
-            print(f"Gradient norm: {total_norm:.6f}")
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Train Loss: {train_loss:.4f}  |  Val Loss: {validation_loss:.4f}  |  LR: {current_lr:.2e}")
             epoch_end = time.time()
-            print(f"epoch {i} took {epoch_end - epoch_start}")
+            print(f"Epoch {i} took {epoch_end - epoch_start:.1f}s")
         training_end = time.time()
         total_time = training_end - training_start
         perf.finalise(total_time)

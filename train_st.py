@@ -151,6 +151,7 @@ def train_st(config):
     batch_size = config["training_params"]["batch_size"]
     fold_count = config["training_params"]["fold_count"]
     datasources = config["datasources"]
+    cml_mode = config['model'].get('cml_mode', 'node')
 
     tp = config.get("temporal_params", {})
     window_size      = tp.get("window_size",      6)
@@ -296,6 +297,7 @@ def train_st(config):
     if "cml" in datasources:
         cml_graph             = CMLGraph(cml_df, cml_coordinates_df)
         shared_cml_heterodata = cml_graph.get_heterodata()
+        shared_cml_link_features = cml_graph.get_link_static_features() if cml_mode == 'edge' else None
         del cml_graph
 
     hidden_channels = config["model"]["hidden_channels"]
@@ -317,6 +319,10 @@ def train_st(config):
             model.parameters(),
             lr=float(config["model"]["learning_rate"]),
             weight_decay=float(config["model"]["weight_decay"]),
+        )
+        # Halve lr when val loss stops improving for 3 consecutive epochs.
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-6
         )
         weighted_alpha    = config["training_params"].get("weighted_loss_alpha", 0.0)
         stopping_patience = config["training_params"]["early_stop"]
@@ -341,6 +347,7 @@ def train_st(config):
                 model, val_loader, device,
                 weighted_loss_alpha=weighted_alpha,
             )
+            scheduler.step(val_loss)
 
             training_loss_arr.append(train_loss)
             validation_loss_arr.append(val_loss)
@@ -358,7 +365,8 @@ def train_st(config):
                 early_counter += 1
 
             epochs_run += 1
-            print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}")
+            current_lr = optimizer.param_groups[0]["lr"]
+            print(f"  Train loss: {train_loss:.4f}  |  Val loss: {val_loss:.4f}  |  LR: {current_lr:.2e}")
 
             total_norm = sum(
                 p.grad.data.norm(2).item() ** 2
@@ -417,6 +425,7 @@ def train_st(config):
                 coords=cml_coordinates_df,
                 layer_name="cml",
                 knn=config["layer_connect"]["cml_gauge"],
+                link_features=shared_cml_link_features,
             )
 
         # Extract in_channels_dict from the first fold only — feature dims
@@ -427,7 +436,15 @@ def train_st(config):
                 ntype: sample_hd[ntype].x.shape[2]
                 for ntype in sample_hd.node_types
             }
+            if 'cml' in datasources and cml_mode == 'edge':
+                in_channels_dict = {k: v for k, v in in_channels_dict.items() if k != 'cml'}
             print("in_channels_dict:", in_channels_dict)
+
+        if 'cml' in datasources and cml_mode == 'edge' and i == 0:
+            sample_ea = gauge_graph.get_train_heterodata()['raingauge', 'cml_link', 'raingauge'].edge_attr
+            cml_edge_dim = sample_ea.shape[1]
+        elif i == 0:
+            cml_edge_dim = None
 
         # Build a fresh model for this fold
         model = GNNInductiveHeteroST(
@@ -440,6 +457,7 @@ def train_st(config):
             lstm_hidden=lstm_hidden,
             lstm_layers=lstm_layers,
             dropout=dropout,
+            cml_edge_dim=cml_edge_dim,
         ).to(device=device)
 
         # Build DataLoaders

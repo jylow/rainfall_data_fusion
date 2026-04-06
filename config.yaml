@@ -14,7 +14,7 @@
       bottom: 1.188
     },
     cml_folder: 'combined_microwave_link_data_2024_2025.nc',
-    include_lpe: False,
+    include_lpe: True,
   },
 
   visualisation: {
@@ -55,11 +55,11 @@
       seed: 123,
       batch_size: 256, #hyper_param
       epochs: 100,
-      early_stop: 5,
-      weighted_loss_alpha: 1.0,  # 0.0 = plain MSE; increase to upweight rain events
+      early_stop: 10,            # more patience: epoch 1 fast-drop is the lazy optimum, not convergence
+      weighted_loss_alpha: 2.0,  # higher upweighting forces model to keep learning rain signal
   },
 
-  datasources: ['raingauge','cml'],
+  datasources: ['raingauge'],
 
   layer_connect: {
     gauge_gauge: 5, #hyper_param
@@ -71,9 +71,10 @@
   model: {
     hidden_channels: 32, #hyper_param
     num_layers: 2, #hyper_param
-    learning_rate: 0.001,
+    learning_rate: 0.0001,       # lower lr: 0.001 exhausts useful gradient steps within epoch 1
     weight_decay: 1e-4,
     dropout: 0.0,         # dropout probability after each GNN layer; 0.0 = disabled
+    cml_mode: 'node',     # 'node' = CML endpoints as nodes; 'edge' = CML links as raingauge-raingauge edges with static features
   },
 
   # Analysis / visualisation parameters (used by analysis notebooks only)

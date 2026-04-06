@@ -193,15 +193,47 @@ class GaugeGraphNew():
         return heterodata
 
 
-    def add_heterodata(self, heterodata_layer: HeteroData, coords:pd.DataFrame, layer_name: str,knn=4) -> tuple[HeteroData, HeteroData, HeteroData]:
+    def add_heterodata(self, heterodata_layer: HeteroData, coords:pd.DataFrame, layer_name: str, knn=4, link_features=None) -> tuple[HeteroData, HeteroData, HeteroData]:
         '''
         Adds layer to the heterodata.
+
+        In edge mode (cml_mode='edge', layer_name='cml'), CML links are added
+        as direct raingauge-raingauge edges carrying static link features,
+        rather than as separate CML nodes.  link_features must be provided
+        ([N_links, F_static] from CMLGraph.get_link_static_features()).
         '''
         if not self.fused_train_heterodata:
             self.fused_train_heterodata = self.train_heterodata.clone()
             self.fused_validation_heterodata = self.validation_heterodata.clone()
             self.fused_test_heterodata = self.test_heterodata.clone()
 
+        cml_mode = config['model'].get('cml_mode', 'node')
+        if layer_name == 'cml' and cml_mode == 'edge':
+            # Edge mode: add CML links as raingauge-raingauge edges; no CML nodes.
+            train_rg_coords = list(zip(
+                self.mapping_df[self.train_mask]['longitude'],
+                self.mapping_df[self.train_mask]['latitude'],
+            ))
+            val_rg_coords = list(zip(
+                self.mapping_df[np.logical_or(self.train_mask, self.val_mask)]['longitude'],
+                self.mapping_df[np.logical_or(self.train_mask, self.val_mask)]['latitude'],
+            ))
+            test_rg_coords = list(zip(
+                self.mapping_df['longitude'],
+                self.mapping_df['latitude'],
+            ))
+            for rg_coords, fused_hd in [
+                (train_rg_coords, self.fused_train_heterodata),
+                (val_rg_coords,   self.fused_validation_heterodata),
+                (test_rg_coords,  self.fused_test_heterodata),
+            ]:
+                elist, eattr = self.connect_cml_as_edges(rg_coords, coords, link_features)
+                fused_hd['raingauge', 'cml_link', 'raingauge'].edge_index = \
+                    torch.tensor(elist, dtype=torch.long).T
+                fused_hd['raingauge', 'cml_link', 'raingauge'].edge_attr = eattr
+            return self.fused_train_heterodata, self.fused_validation_heterodata, self.fused_test_heterodata
+
+        # Node mode (default): copy CML nodes and their internal edges as before.
         for node_type in heterodata_layer.node_types:
             self.fused_train_heterodata[node_type].x = heterodata_layer[node_type].x
             self.fused_validation_heterodata[node_type].x = heterodata_layer[node_type].x
@@ -314,6 +346,66 @@ class GaugeGraphNew():
         weight_list = [x / max_weight for x in weight_list]
 
         return edge_list, weight_list
+
+    def connect_cml_as_edges(
+        self,
+        raingauge_coords,
+        cml_coords: pd.DataFrame,
+        link_features: torch.Tensor,
+    ) -> tuple[list, torch.Tensor]:
+        """
+        Edge mode: each CML link becomes a direct raingauge-raingauge edge.
+
+        For each link, find the raingauge nearest to site_a (g_a) and the one
+        nearest to site_b (g_b).  Creates both (g_a→g_b) and (g_b→g_a) edges,
+        each carrying the link's static feature vector.
+
+        Parameters
+        ----------
+        raingauge_coords : list of (lon, lat) for the current split
+        cml_coords       : cml_coordinates_df — one row per endpoint, all rows
+        link_features    : [N_links, F_static] from CMLGraph.get_link_static_features()
+
+        Returns
+        -------
+        edge_list : list[(g_a, g_b), (g_b, g_a), ...]  length 2*N_links
+        edge_attr : Tensor [2*N_links, F_static]
+        """
+        cml_links = cml_coords.iloc[::2].reset_index(drop=True)  # one row per link
+
+        gauge_gdf = gpd.GeoDataFrame(
+            geometry=[Point(lon, lat) for lon, lat in raingauge_coords],
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
+        node_a_gdf = gpd.GeoDataFrame(
+            geometry=gpd.points_from_xy(
+                cml_links['site_a_longitude'], cml_links['site_a_latitude']
+            ),
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
+        node_b_gdf = gpd.GeoDataFrame(
+            geometry=gpd.points_from_xy(
+                cml_links['site_b_longitude'], cml_links['site_b_latitude']
+            ),
+            crs="EPSG:4326",
+        ).to_crs("EPSG:3857")
+
+        gauge_pts = [row.geometry for _, row in gauge_gdf.iterrows()]
+
+        edge_list, feat_list = [], []
+        for link_i in range(len(cml_links)):
+            pt_a = node_a_gdf.iloc[link_i].geometry
+            pt_b = node_b_gdf.iloc[link_i].geometry
+            g_a = min(range(len(gauge_pts)), key=lambda i: gauge_pts[i].distance(pt_a))
+            g_b = min(range(len(gauge_pts)), key=lambda i: gauge_pts[i].distance(pt_b))
+            feat = link_features[link_i]   # [F_static]
+            edge_list.append((g_a, g_b))   # forward
+            feat_list.append(feat)
+            edge_list.append((g_b, g_a))   # reverse
+            feat_list.append(feat)
+
+        edge_attr = torch.stack(feat_list, dim=0)  # [2*N_links, F_static]
+        return edge_list, edge_attr
 
     def connect_graphs(self, raingauge_coords, other_coords: pd.DataFrame, knn=16) -> tuple[list, list]:
         edges = []

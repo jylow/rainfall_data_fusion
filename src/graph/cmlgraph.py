@@ -68,6 +68,23 @@ class CMLGraph():
     def get_heterodata(self) -> HeteroData:
         return self.heterodata
 
+    def get_link_static_features(self) -> torch.Tensor:
+        """
+        Returns [N_links, F_static] — one feature vector per link using
+        time-invariant properties: length, frequency, polarization (one-hot).
+        Row order matches self.coordinates_df (one row per link, iloc[::2]).
+        """
+        static_cols = ['link_id', 'length', 'frequency', 'polarization']
+        present = [c for c in static_cols if c in self.df.columns]
+        encoded = pd.get_dummies(
+            self.df[present].drop_duplicates('link_id').set_index('link_id'),
+            columns=['polarization'] if 'polarization' in present else [],
+        )
+        # Align to the link order used by coordinates_df
+        encoded = encoded.reindex(self.coordinates_df['link_id'].values)
+        tensor = torch.tensor(encoded.values.astype(float), dtype=torch.float32)
+        return torch.nan_to_num(tensor, nan=0.0)
+
     def generate_heterodata(self):
         #Convert data in dataframe to tensor
         datatensor = self.datatensor
