@@ -231,7 +231,7 @@ def stratified_spatial_sampling_dual(
     return results
 
 def stratified_spatial_kfold_dual(
-    station_dict,
+    raingauge_mapping_df,
     n_splits=5,
     validation_percent=20,
     n_clusters=8,
@@ -276,9 +276,9 @@ def stratified_spatial_kfold_dual(
     """
 
     # --- Step 1: Prepare data
-    station_ids = np.array(list(station_dict.keys()))
-    station_coords = np.array([[lon, lat] for lat, lon in station_dict.values()])
-    n_stations = len(station_ids)
+    raingauge_ids = raingauge_mapping_df['id'].to_numpy()
+    raingauge_coords = np.array(list(zip(raingauge_mapping_df['longitude'], raingauge_mapping_df['latitude'])))
+    n_stations = len(raingauge_ids)
 
     print("=" * 80)
     print("SPATIAL K-FOLD STRATIFIED SAMPLING (Fixed)")
@@ -291,7 +291,7 @@ def stratified_spatial_kfold_dual(
 
     # --- Step 2: K-Means clustering (done ONCE for consistency)
     kmeans = KMeans(n_clusters=n_clusters, random_state=seed, n_init=10)
-    cluster_labels = kmeans.fit_predict(station_coords)
+    cluster_labels = kmeans.fit_predict(raingauge_coords)
 
     # --- Step 3: Create rotation scheme for each cluster
     # Ensures exactly 1 test station per cluster per fold (when possible)
@@ -332,7 +332,7 @@ def stratified_spatial_kfold_dual(
 
     for fold_idx in range(n_splits):
         print(f"\n{'='*80}")
-        print(f"Creating Fold {fold_idx}/{n_splits}")
+        print(f"Creating Fold {fold_idx + 1}/{n_splits}")
         print(f"{'='*80}")
 
         test_indices = []
@@ -386,10 +386,10 @@ def stratified_spatial_kfold_dual(
             ml_val_indices.extend(cluster_val)
 
         # --- Step 6: Convert to station IDs
-        test_stations = station_ids[test_indices]
-        stat_train_stations = station_ids[train_indices]
-        ml_train_stations = station_ids[ml_train_indices]
-        ml_val_stations = station_ids[ml_val_indices]
+        test_stations = raingauge_ids[test_indices]
+        stat_train_stations = raingauge_ids[train_indices]
+        ml_train_stations = raingauge_ids[ml_train_indices]
+        ml_val_stations = raingauge_ids[ml_val_indices]
 
         # --- Step 7: Store results
         fold_result = {
@@ -418,7 +418,7 @@ def stratified_spatial_kfold_dual(
 
         if plot:
             create_dual_sampling_visualization(
-                fold_result, station_coords, station_ids, cluster_labels, 
+                fold_result, raingauge_coords, raingauge_ids, cluster_labels, 
                 kmeans.cluster_centers_, 
                 output_path=f"fold_{fold_idx+1}_sampling_results.png"
             )

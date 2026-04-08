@@ -1,9 +1,98 @@
-# dataset creation parameters
-dataset_parameters:
-  database_folder: 'database'
-  train_size: 0.7     #training set size
-  test_size: 0.1      #test set size
-  seed: 111           #seed for randomness in training/test split
+{
+  dataset_parameters : {
+    database_folder: 'database',
+    start_year: 2024,
+    end_year: 2025,
+    cml_file: '',
+    train_size: 0.7,
+    test_size: 0.1,      #test set size
+    seed: 111,           #seed for randomness in training/test split
+    geography_bounds: {
+      left: 103.6,
+      right: 104.1,
+      top: 1.5,
+      bottom: 1.188
+    },
+    cml_folder: 'combined_microwave_link_data_2024_2025.nc',
+    include_lpe: False,
+  },
 
-visualisation:
-  bounds: [0.1, 0.2, 0.5, 1, 2, 4, 7, 10, 20]
+  visualisation: {
+    # Metrics to compare side-by-side in spatial error maps
+    # Choose 2 from: rmse, mae, pearson_r, f1
+    compare_metrics: [rmse, pearson_r],
+
+    # Fixed colour scale for rainfall grid plots (mm/hr)
+    rainfall: {
+      vmin: 0,
+      vmax: 50,
+      boundaries: [0, 0.5, 1, 2, 5, 10, 20, 40, 80],
+      log_scale: False,    # set True for logarithmic colour axis (ignores boundaries)
+    },
+
+    # Fixed colour scales for per-station error metric maps
+    # boundaries define colour-transition points; omit for a smooth gradient
+    metrics: {
+      rmse:      {vmin: 1.0, vmax: 3.0, boundaries: [0, 0.5, 1.0, 1.5, 2.0, 3.0]},
+      mae:       {vmin: 0.0, vmax: 2.0, boundaries: [0, 0.3, 0.6, 1.0, 1.5, 2.0]},
+      pearson_r: {vmin: 0.4, vmax: 1.0, boundaries: [0, 0.2, 0.4, 0.6, 0.8, 1.0]},
+      f1:        {vmin: 0.0, vmax: 1.0, boundaries: [0, 0.2, 0.4, 0.6, 0.8, 1.0]},
+      bias:      {vmin: -2.0, vmax: 2.0},
+    },
+  },
+
+  country_info: {
+    name: 'Singapore',
+    country_bounds: {"left": 103.6, "right": 104.1, "top": 1.5, "bottom": 1.188}
+  },
+
+  filters: {
+      uptime_threshold: 0.9
+  },
+
+  training_params: {
+      fold_count: 5,
+      seed: 123,
+      batch_size: 256, #hyper_param
+      epochs: 100,
+      early_stop: 5,
+      weighted_loss_alpha: 1.0,  # 0.0 = plain MSE; increase to upweight rain events
+  },
+
+  datasources: ['raingauge','cml'],
+
+  layer_connect: {
+    gauge_gauge: 5, #hyper_param
+    radar_gauge: 9, #hyper_param
+    cml_gauge: 5, #hyper_param
+    is_directed: True
+  },
+
+  model: {
+    hidden_channels: 32, #hyper_param
+    num_layers: 2, #hyper_param
+    learning_rate: 0.001,
+    weight_decay: 1e-4,
+    dropout: 0.0,         # dropout probability after each GNN layer; 0.0 = disabled
+  },
+
+  # Analysis / visualisation parameters (used by analysis notebooks only)
+  analysis: {
+    time_start: 2024-06-17,          # e.g. "2024-08-01" — null = full test period
+    time_end:   2025-04-30,          # e.g. "2024-08-31" — null = full test period
+    rolling_window: 96,        # rolling window for time-series plots (96 × 15-min = 24 h)
+    selected_station: null,    # station ID for per-station rainfall plot; null = pick first test station
+
+    # Per-timestep error metric plot window (plot_timestep_metrics / plot_timestep_comparison)
+    ts_display_start: '2025-04-20',    # timestamp string to start display from, e.g. "2024-08-01" — null = from beginning
+    ts_frame_count:   120,    # number of timesteps to show — null = show all
+  },
+
+  # Spatio-temporal parameters (used by train_st.py only; ignored by train_fused.py)
+  temporal_params: {
+    window_size: 4,          # number of preceding timesteps used as LSTM context (W)
+    max_gap_minutes: 10,     # windows spanning a gap > this value are dropped
+    lstm_hidden: 32,         # LSTM hidden state dimension
+    lstm_layers: 1,          # number of stacked LSTM layers
+  }
+}
