@@ -4,11 +4,11 @@ from dataset.weather_graph_dataset import (
     WeatherGraphDatasetNew,
     HomogeneousWeatherGraphDatasetNew,
 )
-from src.miscellaneous import get_straight_distance
 import xarray as xr
 import rasterio
 import yaml
 import numpy as np
+import math
 import torch
 import networkx as nx
 from sklearn.neighbors import NearestNeighbors
@@ -63,60 +63,45 @@ def add_homogeneous_weather_station_data(
     general_station_ids=None,
     rainfall_station_ids=None,
     dtype=torch.float32,
-):
-    general_station_data_tensor = torch.tensor(
-        np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
-    )
+) -> torch.tensor:
+    if general_station_features:
+        general_station_data_tensor = torch.tensor(
+            np.array(general_station_features)[:, :, 0:1], dtype=dtype
+        )
+
     rainfall_station_data_tensor = torch.tensor(
-        np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
+        np.array(rainfall_station_features).transpose(1,0), dtype=dtype
     )
+    print("HERE")
 
     # Add station targets
-    general_station_target_tensor = torch.tensor(
-        np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
-    )
+    if general_station_features:
+        general_station_target_tensor = torch.tensor(
+            np.array(general_station_features)[:, :, 0:1].transpose(1, 0, 2), dtype=dtype
+        )
     rainfall_station_target_tensor = torch.tensor(
-        np.array(rainfall_station_features).transpose(1, 0, 2), dtype=dtype
+        np.array(rainfall_station_features).transpose(1,0), dtype=dtype
     )
+    rain_ids = torch.tensor(np.arange(np.array(rainfall_station_features).shape[0]), dtype = torch.long)
 
-    # --- Add station IDs ---
-    # Number of general + rainfall stations
-    N_gen = np.array(general_station_features).shape[0]
-    N_rain = np.array(rainfall_station_features).shape[0]
-
-    # --- Assign General Station IDs ---
-    if general_station_ids is not None and isinstance(general_station_ids, int):
-        gen_ids = torch.tensor(np.array(general_station_ids), dtype=torch.long)
+    if general_station_features:
+        station_data_tensor = torch.concat(
+            [general_station_data_tensor, rainfall_station_data_tensor], dim=1
+        )
+        station_target_tensor = torch.concat(
+            [general_station_target_tensor, rainfall_station_target_tensor], dim=1
+        )
+        station_id_tensor = torch.concat([gen_ids, rain_ids], dim=0)
+        data.x = station_data_tensor
+        data.y = station_target_tensor
+        data.station_id = station_id_tensor
     else:
-        gen_ids = torch.tensor(np.arange(N_gen), dtype=torch.long)
-
-    # --- Assign Rainfall Station IDs with OFFSET ---
-    if rainfall_station_ids is not None and isinstance(rainfall_station_ids, int):
-        rain_ids = torch.tensor(np.array(rainfall_station_ids), dtype=torch.long)
-    else:
-        rain_ids = torch.tensor(np.arange(N_gen, N_gen + N_rain), dtype=torch.long)
-
-    # print("\n=== Station ID Mapping ===")
-    # print("\nGeneral Stations:")
-    # for name, sid in zip(general_station_features, gen_ids):
-    #     print(f"  {name}  →  {sid}")
-
-    # print("\nRainfall Stations (Offset IDs):")
-    # for name, sid in zip(rainfall_station_features, rain_ids):
-    #     print(f"  {name}  →  {sid}")
-
-    # print("\nTotal Stations:", len(gen_ids) + len(rain_ids))
-
-    station_data_tensor = torch.concat(
-        [general_station_data_tensor, rainfall_station_data_tensor], dim=1
-    )
-    station_target_tensor = torch.concat(
-        [general_station_target_tensor, rainfall_station_target_tensor], dim=1
-    )
-    station_id_tensor = torch.concat([gen_ids, rain_ids], dim=0)
-    data.x = station_data_tensor
-    data.y = station_target_tensor
-    data.station_id = station_id_tensor
+        station_data_tensor = rainfall_station_data_tensor
+        station_target_tensor = rainfall_station_target_tensor
+        station_id_tensor = rain_ids
+        data.x = station_data_tensor
+        data.y = station_target_tensor
+        data.station_id = station_id_tensor
 
     print(data)
     print("\n=== Station Features Added ===")
@@ -212,15 +197,15 @@ def add_mask_to_data(data, split_info, general_station, rainfall_station):
 
 
 def add_homogeneous_mask_to_data(data, split_info, stations):
-    data.train_mask = [
+    data.train_mask = torch.tensor([
         1 if station in split_info["ml"]["train"] else 0 for station in stations
-    ]
-    data.val_mask = [
+    ])
+    data.val_mask = torch.tensor([
         1 if station in split_info["ml"]["validation"] else 0 for station in stations
-    ]
-    data.test_mask = [
+    ])
+    data.test_mask = torch.tensor([
         1 if station in split_info["ml"]["test"] else 0 for station in stations
-    ]
+    ])
 
     return data
 
@@ -679,7 +664,7 @@ def prepare_homogeneous_inductive_dataset(
         print("PREPARING TRAIN/VAL DATALOADERS (using train_graph)")
         print(f"{'=' * 60}")
 
-        train_graph = filter_edges_for_inductive(train_graph)
+        #train_graph = filter_edges_for_inductive(train_graph)
         train_dataset = HomogeneousWeatherGraphDatasetInductive(
             train_graph, mode="train"
         )
@@ -687,8 +672,12 @@ def prepare_homogeneous_inductive_dataset(
             validation_graph, mode="val"
         )
 
+        #Duplicate train graph N (no. of nodes) times to generate mask one graphs
+        
+
         # Inspect one sample
         sample = train_dataset[0]
+        print(sample)
         print(f"Sample node features shape: {sample.x.shape}")  # [N, F]
         print(f"Sample labels shape: {sample.y.shape}")  # [N, Tgt]
         print(f"Train mask shape: {train_dataset.mask.shape}")  # [N]
@@ -712,6 +701,7 @@ def prepare_homogeneous_inductive_dataset(
 
         # Verify batch shapes
         sample_batch = next(iter(train_loader))
+        print(sample_batch.x[0].shape)
         print(f"\n{'=' * 60}")
         print("BATCH VERIFICATION")
         print(f"{'=' * 60}")
@@ -822,6 +812,7 @@ def build_train_and_full_graph_homogeneous(
     full_graph.val_mask = val_mask
     full_graph.test_mask = test_mask
 
+
     # 2. Build train_graph (subgraph)
     # -------------------------------------------------
     train_graph = data.clone()
@@ -834,8 +825,11 @@ def build_train_and_full_graph_homogeneous(
     # --- Filter Node Features (Spatio-Temporal Aware) ---
     # We must filter on dimension 1 (the Node dimension)
     # (T, N_total, F) -> (T, N_sub, F)
+    print(train_graph)
+    print(keep_nodes_mask)
     train_graph.x = train_graph.x[:, keep_nodes_mask, :]
     train_graph.y = train_graph.y[:, keep_nodes_mask, :]
+    print(type(train_graph.x))
 
     # --- Filter other node-level attributes ---
     # We also filter the masks themselves so they align with the new graph
@@ -913,11 +907,6 @@ def build_train_and_full_graph_homogeneous(
         and validation_graph.edge_attr is not None
     ):
         validation_graph.edge_attr = validation_graph.edge_attr[:, edge_mask]
-
-    # print("after processing, train edge_index:", train_graph.edge_index.shape)
-    # print("after processing, train edge_attr:", train_graph.edge_attr.shape)
-    # print("after processing, full edge_index:", full_graph.edge_index.shape)
-    # print("after processing, full edge_attr:", full_graph.edge_attr.shape)
 
     return train_graph, validation_graph, full_graph
 
@@ -1014,3 +1003,7 @@ def build_train_and_full_graph(
     train_graph.edge_index_dict = new_edge_index_dict
 
     return train_graph, full_graph
+
+
+def get_straight_distance(a, b):
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)

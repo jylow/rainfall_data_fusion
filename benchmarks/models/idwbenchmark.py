@@ -7,7 +7,7 @@ import tqdm
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import pearsonr, spearmanr
-
+from sklearn.metrics import f1_score
 
 
 def run_IDW_benchmark(raingauge_data: pd.DataFrame,
@@ -15,8 +15,9 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
                             training_stations: list,
                             test_stations: list,
                             power=2,
-                            n_nearest=15,
+                            n_nearest=10,
                             fold=0,
+                            rain_threshold=0.5,
                             regression_plot=False):
     '''
     Runs IDW benchmark with exact point interpolation.
@@ -36,13 +37,22 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         Power parameter for IDW
     n_nearest : int, optional (default=15)
         Number of nearest training stations to use for each interpolation
+    fold : int, optional (default=0)
+        Fold index for saving regression plot
+    rain_threshold : float, optional (default=0.1)
+        Rainfall threshold (mm/hr) for binary rain/no-rain F1 classification
     regression_plot : bool, optional (default=False)
         Whether to show regression plot
 
     Returns:
     --------
-    average_RMSE_loss : float
-        Root mean squared error across all timestamps and test stations
+    dict with keys:
+        average_RMSE_loss : float
+            Root mean squared error across all timestamps and test stations
+        average_MAE_loss : float
+            Mean absolute error across all timestamps and test stations
+        f1 : float
+            F1 score for rain/no-rain classification at rain_threshold
     '''
 
     start_time = time.time()
@@ -60,7 +70,6 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         timestep_predicted_values_list = []
         #Handle missing values
         row = row.dropna()
-        #row = row.fillna(0)
 
         # Get training data for this timestamp
         training_coords = []
@@ -112,13 +121,20 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         predicted_values_list.append(np.array(timestep_predicted_values_list))
 
     timestep_MSE_arr = []
+    timestep_MAE_arr = []
     for i in range(len(actual_values_list)):
-        timestep_MSE = np.nanmean((actual_values_list[i] - predicted_values_list[i]) ** 2)
+        if len(actual_values_list[i]) == 0:
+            continue
+        timestep_MSE = np.mean((actual_values_list[i] - predicted_values_list[i]) ** 2)
+        timestep_MAE = np.mean(np.abs(actual_values_list[i] - predicted_values_list[i]))
         timestep_MSE_arr.append(timestep_MSE)
+        timestep_MAE_arr.append(timestep_MAE)
+
     timestep_RMSE_arr = np.sqrt(np.array(timestep_MSE_arr))
     average_timestep_RMSE = np.mean(timestep_RMSE_arr)
+    average_timestep_MAE = np.mean(np.array(timestep_MAE_arr))
 
-    actual_values_arr = np.concat(actual_values_list) #This is a 2d array of no. timestamps *
+    actual_values_arr = np.concat(actual_values_list)
     predicted_values_arr = np.concat(predicted_values_list)
 
     # Remove any NaN values
@@ -130,10 +146,17 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
 
     pearson_r, pearson_p = pearsonr(actual_values_arr, predicted_values_arr)
 
-    # Calculate MSE and RMSE
+    # Calculate MSE, RMSE, and MAE
     squared_errors = (actual_values_arr - predicted_values_arr) ** 2
-    average_MSE_loss = np.mean(squared_errors)
+    absolute_errors = np.abs(actual_values_arr - predicted_values_arr)
+    average_MSE_loss = np.nanmean(squared_errors)
     average_RMSE_loss = np.sqrt(average_MSE_loss)
+    average_MAE_loss = np.nanmean(absolute_errors)
+
+    # Calculate F1 score for rain/no-rain classification
+    actual_binary = (actual_values_arr >= rain_threshold).astype(int)
+    predicted_binary = (predicted_values_arr >= rain_threshold).astype(int)
+    f1 = f1_score(actual_binary, predicted_binary, zero_division=0)
 
     end_time = time.time()
     time_taken = end_time - start_time
@@ -141,6 +164,9 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
     print(f"Average RMSE loss: {average_RMSE_loss:.4f} mm/hr")
     print(f"Average RMSE per timestep: {average_timestep_RMSE:.4f} mm/hr")
     print(f"Average MSE loss: {average_MSE_loss:.4f} mm²/hr²")
+    print(f"Average MAE loss: {average_MAE_loss:.4f} mm/hr")
+    print(f"Average MAE per timestep: {average_timestep_MAE:.4f} mm/hr")
+    print(f"F1 Score (threshold={rain_threshold} mm/hr): {f1:.4f}")
     print(f"Time taken: {time_taken:.2f} seconds")
     print(f"Number of predictions: {len(actual_values_arr)}")
 
@@ -149,8 +175,15 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         plt.figure(figsize=(10, 10))
         plt.scatter(actual_values_arr, predicted_values_arr, alpha=0.5)
 
-        text = f"Pearson r = {pearson_r:.3f}\nRMSE = {average_RMSE_loss:.3f} \n TimestepRMSE = {average_timestep_RMSE:.3f}"
-        plt.text( 0.05, 0.95, text, transform=plt.gca().transAxes, verticalalignment="top", bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"), )
+        text = (
+            f"Pearson r = {pearson_r:.3f}\n"
+            f"RMSE = {average_RMSE_loss:.3f} mm/hr\n"
+            f"TimestepRMSE = {average_timestep_RMSE:.3f} mm/hr\n"
+            f"MAE = {average_MAE_loss:.3f} mm/hr\n"
+            f"F1 = {f1:.3f} (threshold={rain_threshold} mm/hr)"
+        )
+        plt.text(0.05, 0.95, text, transform=plt.gca().transAxes, verticalalignment="top",
+                 bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"))
 
         plot_bound = max(np.nanmax(actual_values_arr), np.nanmax(predicted_values_arr))
         plt.plot([0, plot_bound], [0, plot_bound], 'r--', label='Perfect prediction')
@@ -162,5 +195,8 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         plt.grid(True, alpha=0.3)
         plt.savefig(f'idw_results/plot{fold}.png')
 
-
-    return average_RMSE_loss
+    return {
+        "average_RMSE_loss": average_RMSE_loss,
+        "average_MAE_loss": average_MAE_loss,
+        "f1": f1,
+    }
