@@ -1,8 +1,6 @@
 import numpy as np
 from sklearn.cluster import KMeans
 
-from src.visualization.sampling import create_dual_sampling_visualization
-
 
 def stratified_spatial_sampling_dual(
     station_dict,
@@ -224,6 +222,7 @@ def stratified_spatial_sampling_dual(
 
     # Create visualization if requested
     if plot:
+        from src.visualization.sampling import create_dual_sampling_visualization
         create_dual_sampling_visualization(
             results, station_coords, station_ids, cluster_labels, centroids, output_path=output_path
         )
@@ -417,9 +416,10 @@ def stratified_spatial_kfold_dual(
         print(f"  ML validation: {len(ml_val_stations)} ({len(ml_val_stations)/n_stations*100:.1f}%)")
 
         if plot:
+            from src.visualization.sampling import create_dual_sampling_visualization
             create_dual_sampling_visualization(
-                fold_result, raingauge_coords, raingauge_ids, cluster_labels, 
-                kmeans.cluster_centers_, 
+                fold_result, raingauge_coords, raingauge_ids, cluster_labels,
+                kmeans.cluster_centers_,
                 output_path=f"fold_{fold_idx+1}_sampling_results.png"
             )
 

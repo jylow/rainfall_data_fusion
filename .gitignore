@@ -1,7 +1,11 @@
 #sensitive data
 database/
 local/
-
+*.csv
+*.jpeg
+*.jsonl
+*.png
+*.pth
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
