@@ -92,7 +92,7 @@
   # Spatio-temporal parameters (used by train_st.py only; ignored by train_fused.py)
   temporal_params: {
     window_size: 4,          # number of preceding timesteps used as LSTM context (W)
-    max_gap_minutes: 10,     # windows spanning a gap > this value are dropped
+    max_gap_minutes: 15,     # windows spanning a gap > this value are dropped
     lstm_hidden: 32,         # LSTM hidden state dimension
     lstm_layers: 2,          # number of stacked LSTM layers
   }

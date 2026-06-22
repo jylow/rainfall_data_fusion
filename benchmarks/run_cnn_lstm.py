@@ -182,9 +182,11 @@ def _eval_epoch(model, loader, device,
             all_preds.append(pred_at.cpu().numpy())
             all_targets.append(targets.cpu().numpy())
 
+    if not all_preds:
+        return float("nan"), np.array([]), np.array([])
     preds   = np.concatenate(all_preds).ravel()
     targets = np.concatenate(all_targets).ravel()
-    return float(np.mean(losses)), preds, targets
+    return float(np.mean(losses)) if losses else float("nan"), preds, targets
 
 
 # ============================================================
