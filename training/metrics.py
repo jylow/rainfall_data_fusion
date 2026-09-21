@@ -57,10 +57,18 @@ def compute_binary_classification_metrics(
     f1 = f1_score(true_labels, pred_labels, pos_label=pos_label, zero_division=zero_division)
     cm = confusion_matrix(true_labels, pred_labels, labels=[0, 1])
 
+    tn, fp, fn, tp = cm.ravel()
+    pod = tp / (tp + fn) if (tp + fn) > 0 else zero_division
+    far = fp / (tp + fp) if (tp + fp) > 0 else zero_division
+    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else zero_division
+
     return {
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "pod": float(pod),
+        "far": float(far),
+        "csi": float(csi),
         "confusion_matrix": cm,
         "threshold": threshold,
         "support_pos": int(true_labels.sum()),

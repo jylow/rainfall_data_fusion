@@ -14,7 +14,7 @@ Three input channels (all interpolated to the same 0.01° Singapore grid):
   Ch 2 – Weather radar reflectivity grid
 
 Supervision: weighted MSE at training station locations (same loss as GNN).
-Evaluation : RMSE, MAE, F1, Pearson r at held-out test station locations.
+Evaluation : RMSE, MAE, F1, Pearson r, POD, FAR, CSI at held-out test station locations.
 """
 
 import os
@@ -40,7 +40,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from scipy.stats import pearsonr
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix
 import tqdm
 import xarray as xr
 
@@ -251,12 +251,28 @@ def _compute_metrics(preds, targets, rain_threshold=0.5):
     rmse = float(np.sqrt(np.mean((p - t) ** 2)))
     mae  = float(np.mean(np.abs(p - t)))
     r, _ = pearsonr(p, t) if len(p) > 1 else (0.0, 1.0)
-    f1   = f1_score(
-        (t >= rain_threshold).astype(int),
-        (p >= rain_threshold).astype(int),
-        zero_division=0,
-    )
-    return {"rmse": rmse, "mae": mae, "pearson_r": float(r), "f1": float(f1)}
+
+    pred_labels = (p >= rain_threshold).astype(int)
+    true_labels = (t >= rain_threshold).astype(int)
+    f1 = f1_score(true_labels, pred_labels, zero_division=0)
+
+    # POD (Probability of Detection) = TP / (TP + FN) — same value as recall
+    # FAR (False Alarm Ratio) = FP / (TP + FP) — NOT the same as 1 - precision
+    # CSI (Critical Success Index / Threat Score) = TP / (TP + FP + FN)
+    tn, fp, fn, tp = confusion_matrix(true_labels, pred_labels, labels=[0, 1]).ravel()
+    pod = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    far = fp / (tp + fp) if (tp + fp) > 0 else 0.0
+    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
+
+    return {
+        "rmse": rmse,
+        "mae": mae,
+        "pearson_r": float(r),
+        "f1": float(f1),
+        "pod": float(pod),
+        "far": float(far),
+        "csi": float(csi),
+    }
 
 
 # ============================================================

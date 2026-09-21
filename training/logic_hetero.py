@@ -315,6 +315,9 @@ def test_model(
             "precision": m["precision"],
             "recall": m["recall"],
             "f1": m["f1"],
+            "pod": m["pod"],
+            "far": m["far"],
+            "csi": m["csi"],
             "support_pos": m["support_pos"],
             "support_neg": m["support_neg"],
         })
@@ -345,7 +348,10 @@ def test_model(
         f"--- threshold = {rain_threshold} mm ---\n"
         f"Precision = {global_cls['precision']:.3f}\n"
         f"Recall = {global_cls['recall']:.3f}\n"
-        f"F1 = {global_cls['f1']:.3f}"
+        f"F1 = {global_cls['f1']:.3f}\n"
+        f"POD = {global_cls['pod']:.3f}\n"
+        f"FAR = {global_cls['far']:.3f}\n"
+        f"CSI = {global_cls['csi']:.3f}"
     )
     plt.text(
         0.05, 0.95, text,
@@ -431,6 +437,9 @@ def test_model(
         "precision": global_cls["precision"],
         "recall": global_cls["recall"],
         "f1": global_cls["f1"],
+        "pod": global_cls["pod"],
+        "far": global_cls["far"],
+        "csi": global_cls["csi"],
         "threshold": rain_threshold,
         "per_station_metrics": per_station,
     }
@@ -495,10 +504,24 @@ def compute_binary_classification_metrics(
     f1 = f1_score(true_labels, pred_labels, pos_label=pos_label, zero_division=zero_division)
     cm = confusion_matrix(true_labels, pred_labels, labels=[0, 1])
 
+    tn, fp, fn, tp = cm.ravel()
+
+    # POD (Probability of Detection) = TP / (TP + FN)  — same value as recall,
+    # kept as a separate key under its meteorological name.
+    pod = tp / (tp + fn) if (tp + fn) > 0 else zero_division
+    # FAR (False Alarm Ratio) = FP / (TP + FP)  — NOT the same as 1 - precision
+    # when there are zero positive predictions; computed independently.
+    far = fp / (tp + fp) if (tp + fp) > 0 else zero_division
+    # CSI (Critical Success Index / Threat Score) = TP / (TP + FP + FN)
+    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else zero_division
+
     return {
         "precision": precision,
         "recall": recall,
         "f1": f1,
+        "pod": float(pod),
+        "far": float(far),
+        "csi": float(csi),
         "confusion_matrix": cm,
         "threshold": threshold,
         "support_pos": int(true_labels.sum()),
@@ -574,6 +597,9 @@ def print_metrics_summary(global_metrics: dict, per_station: dict = None):
     print(f"  Precision      : {global_metrics['precision']:.4f}")
     print(f"  Recall         : {global_metrics['recall']:.4f}")
     print(f"  F1 Score       : {global_metrics['f1']:.4f}")
+    print(f"  POD            : {global_metrics['pod']:.4f}")
+    print(f"  FAR            : {global_metrics['far']:.4f}")
+    print(f"  CSI            : {global_metrics['csi']:.4f}")
     print(f"  Support (pos)  : {global_metrics['support_pos']}")
     print(f"  Support (neg)  : {global_metrics['support_neg']}")
     cm = global_metrics["confusion_matrix"]

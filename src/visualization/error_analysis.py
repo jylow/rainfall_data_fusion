@@ -853,6 +853,332 @@ def predict_on_test_stations(
 
 
 # ---------------------------------------------------------------------------
+# 7a. MC-Dropout uncertainty estimation
+# ---------------------------------------------------------------------------
+
+def predict_on_test_stations_mc_dropout(
+    model,
+    heterodata,
+    mapping_df: pd.DataFrame,
+    device,
+    n_samples: int = 50,
+    output_dir: str | None = None,
+    checkpoint_every: int = 200,
+    log_every: int = 1000,
+) -> tuple[np.ndarray, np.ndarray, list]:
+    """
+    MC-Dropout inference: repeat the forward pass `n_samples` times per timestep
+    with dropout kept stochastic (model.train()), and use the spread of predictions
+    as an uncertainty proxy.
+
+    All `n_samples` replicas for a given timestep are batched into a single
+    forward call (via torch_geometric Batch replication of one snapshot) so that
+    dropout draws an independent random mask per replica in one pass, rather than
+    looping n_samples times per timestep.
+
+    If output_dir is given, results are memory-mapped to disk incrementally
+    (mc_samples.npy, actuals.npy, progress.json) so a long run can be safely
+    interrupted and resumed — resumption happens at the timestep granularity via
+    progress.json's last_completed_t.
+
+    Parameters
+    ----------
+    model      : GNNInductiveHetero built with the SAME dropout probability the
+                 model was trained with (dropout has no learned parameters, so it
+                 is not recoverable from the checkpoint — pass it in explicitly).
+    heterodata : HeteroData from GaugeGraphNew.get_test_heterodata()
+    mapping_df : DataFrame with station metadata ('id' column, node-index ordered)
+    device     : torch device
+    n_samples  : number of stochastic forward passes per timestep (MC-Dropout draws)
+
+    Returns
+    -------
+    samples_arr : np.ndarray [T, n_samples, n_test_stations]  MC-Dropout predictions
+    actuals_arr : np.ndarray [T, n_test_stations]              ground truth
+    station_ids : list[str]                                    column order
+    """
+    import json
+    import torch
+    from pathlib import Path
+    from torch_geometric.data import HeteroData, Batch
+
+    raw_mask = heterodata['raingauge'].mask
+    test_mask = torch.tensor(raw_mask, dtype=torch.bool) if isinstance(raw_mask, np.ndarray) else raw_mask.bool()
+
+    T = heterodata['raingauge'].x.shape[1]
+    test_node_indices = test_mask.nonzero(as_tuple=False).squeeze(1).tolist()
+    station_ids = [mapping_df.iloc[i]['id'] for i in test_node_indices]
+    S = len(station_ids)
+
+    out_dir = Path(output_dir) if output_dir else None
+    start_t = 0
+
+    if out_dir:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        progress_path = out_dir / "progress.json"
+        samples_path = out_dir / "mc_samples.npy"
+        actuals_path = out_dir / "actuals.npy"
+
+        if progress_path.exists():
+            with open(progress_path) as f:
+                progress = json.load(f)
+            if (progress.get("n_samples") == n_samples
+                    and progress.get("T") == T
+                    and progress.get("S") == S):
+                start_t = progress.get("last_completed_t", -1) + 1
+                print(f"Resuming MC-Dropout run from timestep {start_t}/{T}")
+
+        if start_t > 0 and samples_path.exists() and actuals_path.exists():
+            samples_mm = np.lib.format.open_memmap(samples_path, mode='r+')
+            actuals_mm = np.lib.format.open_memmap(actuals_path, mode='r+')
+        else:
+            start_t = 0
+            samples_mm = np.lib.format.open_memmap(
+                samples_path, mode='w+', dtype=np.float32, shape=(T, n_samples, S)
+            )
+            actuals_mm = np.lib.format.open_memmap(
+                actuals_path, mode='w+', dtype=np.float32, shape=(T, S)
+            )
+    else:
+        progress_path = None
+        samples_mm = np.zeros((T, n_samples, S), dtype=np.float32)
+        actuals_mm = np.zeros((T, S), dtype=np.float32)
+
+    model.train()  # keep dropout stochastic; architecture has no BatchNorm so
+                    # train() mode does not otherwise change forward behaviour
+
+    _DATA_FEATURE_DIM = 2
+    node_types_other = [nt for nt in heterodata.node_types if nt != 'raingauge']
+    edge_types = heterodata.edge_types
+    test_mask_dev = test_mask.to(device)
+
+    with torch.no_grad():
+        for t in range(start_t, T):
+            snap = HeteroData()
+            snap['raingauge'].x = heterodata['raingauge'].x[:, t, :].to(device)
+            snap['raingauge'].y = heterodata['raingauge'].y[:, t, :].to(device)
+            snap['raingauge'].mask = test_mask_dev
+            snap['raingauge'].num_nodes = heterodata['raingauge'].x.shape[0]
+
+            for node_type in node_types_other:
+                snap[node_type].x = heterodata[node_type].x[:, t, :].to(device)
+                snap[node_type].num_nodes = heterodata[node_type].x.shape[0]
+
+            for edge_type in edge_types:
+                snap[edge_type].edge_index = heterodata[edge_type].edge_index.to(device)
+                if hasattr(heterodata[edge_type], 'edge_attr'):
+                    snap[edge_type].edge_attr = heterodata[edge_type].edge_attr.to(device)
+
+            x_input = snap['raingauge'].x.clone()
+            x_input[test_mask_dev, :_DATA_FEATURE_DIM] = 0.0
+            snap['raingauge'].x = x_input
+
+            actuals_mm[t] = snap['raingauge'].y[test_mask_dev].cpu().numpy().flatten()
+
+            batch = Batch.from_data_list([snap] * n_samples)
+            x_dict = {nt: batch[nt].x for nt in batch.node_types}
+            edge_attr_dict = {
+                et: batch[et].edge_attr
+                for et in batch.edge_types
+                if hasattr(batch[et], 'edge_attr')
+            }
+            out = model(x_dict, batch.edge_index_dict, edge_attr_dict)
+            out['raingauge'] = out['raingauge'].clamp(min=0.0)
+
+            preds = out['raingauge'][batch['raingauge'].mask].cpu().numpy().reshape(n_samples, S)
+            samples_mm[t] = preds
+
+            if out_dir and ((t + 1) % checkpoint_every == 0 or t == T - 1):
+                samples_mm.flush()
+                actuals_mm.flush()
+                with open(progress_path, "w") as f:
+                    json.dump(
+                        {"last_completed_t": t, "n_samples": n_samples, "T": T, "S": S,
+                         "station_ids": station_ids},
+                        f,
+                    )
+
+            if (t + 1) % log_every == 0 or t == T - 1:
+                print(f"  [{t + 1}/{T}] MC-Dropout inference progress")
+
+    return np.asarray(samples_mm), np.asarray(actuals_mm), station_ids
+
+
+def estimate_obs_noise_variance(model, heterodata, device) -> float:
+    """
+    Estimate the observation-noise term tau^-1 of Gal & Ghahramani (2016) for
+    MC-Dropout predictive variance, as the residual variance of a single
+    deterministic (dropout OFF) pass over the VALIDATION split.
+
+    Dropout alone only captures *epistemic* (model) uncertainty. On this data
+    sigma_dropout is far smaller than the model's actual RMSE, so an
+    epistemic-only interval undercovers real observations — adding tau^-1
+    restores the observation-noise term that dropout-only sampling omits
+    (see compute_mc_dropout_coverage's `sigma2_obs` argument).
+
+    Using validation (not test) keeps the resulting predictive interval
+    honest: test targets are what coverage is measured against afterwards, so
+    calibrating tau^-1 on them would leak.
+
+    Parameters
+    ----------
+    model      : GNNInductiveHetero, same instance used for MC-Dropout inference
+    heterodata : HeteroData from GaugeGraphNew.get_validation_heterodata()
+    device     : torch device
+
+    Returns
+    -------
+    sigma2_obs : float, residual variance in mm^2
+    """
+    import torch
+    from torch_geometric.data import HeteroData
+
+    raw_mask = heterodata['raingauge'].mask
+    val_mask = torch.tensor(raw_mask, dtype=torch.bool) if isinstance(raw_mask, np.ndarray) else raw_mask.bool()
+    val_mask_dev = val_mask.to(device)
+
+    T = heterodata['raingauge'].x.shape[1]
+    _DATA_FEATURE_DIM = 2
+    node_types_other = [nt for nt in heterodata.node_types if nt != 'raingauge']
+    edge_types = heterodata.edge_types
+
+    model.eval()  # dropout OFF — deterministic pass
+
+    residuals = []
+    with torch.no_grad():
+        for t in range(T):
+            snap = HeteroData()
+            snap['raingauge'].x = heterodata['raingauge'].x[:, t, :].to(device)
+            snap['raingauge'].y = heterodata['raingauge'].y[:, t, :].to(device)
+            snap['raingauge'].num_nodes = heterodata['raingauge'].x.shape[0]
+
+            for node_type in node_types_other:
+                snap[node_type].x = heterodata[node_type].x[:, t, :].to(device)
+                snap[node_type].num_nodes = heterodata[node_type].x.shape[0]
+
+            for edge_type in edge_types:
+                snap[edge_type].edge_index = heterodata[edge_type].edge_index.to(device)
+                if hasattr(heterodata[edge_type], 'edge_attr'):
+                    snap[edge_type].edge_attr = heterodata[edge_type].edge_attr.to(device)
+
+            x_input = snap['raingauge'].x.clone()
+            x_input[val_mask_dev, :_DATA_FEATURE_DIM] = 0.0
+            snap['raingauge'].x = x_input
+
+            x_dict = {nt: snap[nt].x for nt in snap.node_types}
+            edge_attr_dict = {
+                et: snap[et].edge_attr
+                for et in snap.edge_types
+                if hasattr(snap[et], 'edge_attr')
+            }
+            out = model(x_dict, snap.edge_index_dict, edge_attr_dict)
+            pred = out['raingauge'].clamp(min=0.0)[val_mask_dev]
+            target = snap['raingauge'].y[val_mask_dev]
+            residuals.append((pred - target).cpu().numpy().flatten())
+
+    residuals = np.concatenate(residuals)
+    return float(np.mean(residuals ** 2))
+
+
+def compute_mc_dropout_coverage(
+    samples_arr: np.ndarray,
+    actuals_arr: np.ndarray,
+    station_ids: list | None = None,
+    central_interval: float = 0.90,
+    sigma2_obs: float | None = None,
+) -> dict:
+    """
+    Compute empirical coverage of the MC-Dropout central interval against ground truth.
+
+    Always reports the epistemic-only interval (empirical percentiles of the
+    MC-Dropout samples). When `sigma2_obs` (tau^-1, see estimate_obs_noise_variance)
+    is supplied, ALSO reports the Gal & Ghahramani (2016) predictive interval
+    mu +/- z*sqrt(sigma_dropout^2 + tau^-1), lower bound clamped at 0 since
+    rainfall is non-negative. That second interval is the one to trust for
+    calibration — the epistemic-only interval undercovers whenever dropout
+    spread is small relative to the model's real error scale.
+
+    Parameters
+    ----------
+    samples_arr : np.ndarray [T, N, S]  MC-Dropout predictions (see predict_on_test_stations_mc_dropout)
+    actuals_arr : np.ndarray [T, S]     ground truth
+    station_ids : list[str] or None     for per-station breakdowns
+    central_interval : float            e.g. 0.90 -> central 90% interval = [5th, 95th] percentile
+    sigma2_obs  : float or None         tau^-1 observation-noise variance (mm^2) from
+                                         estimate_obs_noise_variance; enables the predictive interval
+
+    Returns
+    -------
+    dict with:
+        lower, upper           : np.ndarray [T, S]  epistemic-only interval bounds
+        covered                : np.ndarray [T, S]  bool, actual within [lower, upper]
+        coverage_overall       : float               nominal target = central_interval
+        mean_interval_width    : float
+        coverage_per_station   : pd.Series (if station_ids given)
+        interval_width_per_station : pd.Series (if station_ids given)
+        (if sigma2_obs given, additionally:)
+        pred_lower, pred_upper         : np.ndarray [T, S]  predictive interval bounds
+        covered_predictive              : np.ndarray [T, S]
+        coverage_overall_predictive     : float
+        mean_interval_width_predictive  : float
+        coverage_per_station_predictive : pd.Series (if station_ids given)
+        interval_width_per_station_predictive : pd.Series (if station_ids given)
+    """
+    alpha = 1 - central_interval
+    lower_pct = 100 * (alpha / 2)
+    upper_pct = 100 * (1 - alpha / 2)
+
+    lower = np.percentile(samples_arr, lower_pct, axis=1)
+    upper = np.percentile(samples_arr, upper_pct, axis=1)
+    covered = (actuals_arr >= lower) & (actuals_arr <= upper)
+    width = upper - lower
+
+    result = {
+        "lower": lower,
+        "upper": upper,
+        "covered": covered,
+        "coverage_overall": float(covered.mean()),
+        "mean_interval_width": float(width.mean()),
+        "nominal_coverage": central_interval,
+    }
+    if station_ids is not None:
+        result["coverage_per_station"] = pd.Series(covered.mean(axis=0), index=station_ids, name="coverage")
+        result["interval_width_per_station"] = pd.Series(width.mean(axis=0), index=station_ids, name="mean_interval_width")
+
+    if sigma2_obs is not None:
+        from statistics import NormalDist
+
+        mu = samples_arr.mean(axis=1)
+        sigma = samples_arr.std(axis=1, ddof=1)
+        z = NormalDist().inv_cdf(1.0 - alpha / 2.0)
+        sigma_pred = np.sqrt(sigma ** 2 + sigma2_obs)
+
+        pred_lower = np.clip(mu - z * sigma_pred, a_min=0.0, a_max=None)
+        pred_upper = mu + z * sigma_pred
+        covered_predictive = (actuals_arr >= pred_lower) & (actuals_arr <= pred_upper)
+        width_predictive = pred_upper - pred_lower
+
+        result.update({
+            "tau_inv_obs_noise_var": float(sigma2_obs),
+            "sigma_obs": float(np.sqrt(sigma2_obs)),
+            "pred_lower": pred_lower,
+            "pred_upper": pred_upper,
+            "covered_predictive": covered_predictive,
+            "coverage_overall_predictive": float(covered_predictive.mean()),
+            "mean_interval_width_predictive": float(width_predictive.mean()),
+        })
+        if station_ids is not None:
+            result["coverage_per_station_predictive"] = pd.Series(
+                covered_predictive.mean(axis=0), index=station_ids, name="coverage_predictive"
+            )
+            result["interval_width_per_station_predictive"] = pd.Series(
+                width_predictive.mean(axis=0), index=station_ids, name="mean_interval_width_predictive"
+            )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # 7b. Pearson R across all folds
 # ---------------------------------------------------------------------------
 

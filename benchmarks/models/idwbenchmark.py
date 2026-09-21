@@ -7,7 +7,7 @@ import tqdm
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, confusion_matrix
 
 
 def run_IDW_benchmark(raingauge_data: pd.DataFrame,
@@ -158,6 +158,14 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
     predicted_binary = (predicted_values_arr >= rain_threshold).astype(int)
     f1 = f1_score(actual_binary, predicted_binary, zero_division=0)
 
+    # POD (Probability of Detection) = TP / (TP + FN) — same value as recall
+    # FAR (False Alarm Ratio) = FP / (TP + FP) — NOT the same as 1 - precision
+    # CSI (Critical Success Index / Threat Score) = TP / (TP + FP + FN)
+    tn, fp, fn, tp = confusion_matrix(actual_binary, predicted_binary, labels=[0, 1]).ravel()
+    pod = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    far = fp / (tp + fp) if (tp + fp) > 0 else 0.0
+    csi = tp / (tp + fp + fn) if (tp + fp + fn) > 0 else 0.0
+
     end_time = time.time()
     time_taken = end_time - start_time
 
@@ -167,6 +175,9 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
     print(f"Average MAE loss: {average_MAE_loss:.4f} mm/hr")
     print(f"Average MAE per timestep: {average_timestep_MAE:.4f} mm/hr")
     print(f"F1 Score (threshold={rain_threshold} mm/hr): {f1:.4f}")
+    print(f"POD (threshold={rain_threshold} mm/hr): {pod:.4f}")
+    print(f"FAR (threshold={rain_threshold} mm/hr): {far:.4f}")
+    print(f"CSI (threshold={rain_threshold} mm/hr): {csi:.4f}")
     print(f"Time taken: {time_taken:.2f} seconds")
     print(f"Number of predictions: {len(actual_values_arr)}")
 
@@ -180,7 +191,8 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
             f"RMSE = {average_RMSE_loss:.3f} mm/hr\n"
             f"TimestepRMSE = {average_timestep_RMSE:.3f} mm/hr\n"
             f"MAE = {average_MAE_loss:.3f} mm/hr\n"
-            f"F1 = {f1:.3f} (threshold={rain_threshold} mm/hr)"
+            f"F1 = {f1:.3f} (threshold={rain_threshold} mm/hr)\n"
+            f"POD = {pod:.3f}  FAR = {far:.3f}  CSI = {csi:.3f}"
         )
         plt.text(0.05, 0.95, text, transform=plt.gca().transAxes, verticalalignment="top",
                  bbox=dict(facecolor="white", alpha=0.7, edgecolor="black"))
@@ -199,4 +211,7 @@ def run_IDW_benchmark(raingauge_data: pd.DataFrame,
         "average_RMSE_loss": average_RMSE_loss,
         "average_MAE_loss": average_MAE_loss,
         "f1": f1,
+        "pod": pod,
+        "far": far,
+        "csi": csi,
     }
